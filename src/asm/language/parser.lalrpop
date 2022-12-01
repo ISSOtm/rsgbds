@@ -1,0 +1,563 @@
+use std::{cell::RefCell, rc::Rc};
+
+use crate::{
+    error::Reporter,
+    expr::{Expression, RpnCommand},
+    fstack::Fstack,
+    instructions::*,
+    SourceString,
+    symbols::Symbols
+};
+
+use super::{lexer::Mode as LexerMode, Lexer, Location, AsmError, AsmErrorKind, Token};
+
+grammar<'fstack, 'lexer, 'syms>(fstack: &'fstack Fstack,
+                                lexer: &'lexer RefCell<Lexer>,
+                                symbols: &'syms RefCell<Symbols<'fstack>>,
+                                reporter: &mut Reporter);
+
+// The grammar proper.
+
+pub TranslationUnit: () = (DiffMark? Line)*;
+
+DiffMark: () = {
+    <begin:@L> "+" <end:@R> => {
+        reporter.report_error(
+            fstack,
+            AsmError::new(begin, end, AsmErrorKind::DiffMark('+')).into(),
+        );
+    },
+    <begin:@L> "-" <end:@R> => {
+        reporter.report_error(
+            fstack,
+            AsmError::new(begin, end, AsmErrorKind::DiffMark('-')).into(),
+        );
+    },
+};
+
+Line: () = {
+    LineDirective,
+    SimpleLine newline,
+    // TODO: reset lexer mode
+    <!> newline => {
+        reporter.report_error(fstack, <>.error);
+        // Reset lexer mode.
+        let mut lexer = lexer.borrow_mut();
+        lexer.expand_strings = true;
+        lexer.mode = LexerMode::Normal;
+    }
+    // TODO: hint about unindented macros parsed as labels
+};
+
+
+LineDirective: () = {};
+
+
+SimpleLine: () = {
+    LabelDef?,
+    LabelDef? Instruction,
+    LabelDef? MacroInvocation,
+    LabelDef? Directive,
+    AssignmentDirective,
+};
+
+
+LabelDef: () = {
+    ":" => todo!(), // Anonymous label
+    // TODO
+};
+
+
+Instruction: () = {
+    "nop" => todo!(),
+    // TODO
+};
+
+
+MacroInvocation: () = {
+    <name:MacroName> lookahead_hack <args:string*> => todo!(),
+    // TODO
+};
+
+
+Directive: () = {
+    <name:DefIdent> "equ" <expr:NumExpr> => {
+        match expr.try_eval() {
+            Err(err) => reporter.report_error(fstack, err),
+            Ok(value) => {
+                if let Err(err) = symbols.borrow_mut()
+                                         .def_constant(name.0, name.1, name.2, value) {
+                    reporter.report_error(fstack, err);
+                }
+            }
+        }
+    },
+    <name:DefIdent> "equs" <string:string> => {
+        symbols.borrow_mut()
+               .def_string(name.0, name.1, name.2, Rc::new(string))
+               .unwrap_or_else(|error| reporter.report_error(fstack, error))
+    },
+
+    "println" <string:string> => println!("{}", string), // TODO
+    "println" <expr:NumExpr> => {
+        match expr.try_eval() {
+            Ok(value) => println!("${:X}", value as u32),
+            Err(err) => reporter.report_error(fstack, err),
+        }
+    }
+    // TODO
+};
+
+
+AssignmentDirective: () = {
+    <begin:@L> <name:label> <end:@R> "equs" <string:string> => {
+        symbols.borrow_mut()
+               .def_string(begin, name, end, Rc::new(string))
+               .unwrap_or_else(|error| reporter.report_error(fstack, error))
+    }
+    // TODO
+};
+
+
+// Numeric expressions.
+// The rules are ordered by increasing precedence.
+
+NumExpr: Expression<'fstack> = {
+    <begin:@L> "!" <expr:BoolShortCircuit> <end:@R> => {
+        expr.unary_op(begin, RpnCommand::LogicNot, end)
+    },
+    <BoolShortCircuit>,
+};
+
+BoolShortCircuit: Expression<'fstack> = {
+    <begin:@L> <lhs:BoolShortCircuit> <op:BoolShortCircuitOp> <rhs:Comparison> <end:@R> => {
+        lhs.bin_op(begin, op, rhs, end)
+    },
+    <Comparison>,
+};
+BoolShortCircuitOp: RpnCommand = {
+    "&&" => RpnCommand::LogicAnd,
+    "||" => RpnCommand::LogicOr,
+};
+
+Comparison: Expression<'fstack> = {
+    // TODO
+    <AddSub>,
+};
+
+AddSub: Expression<'fstack> = {
+    <begin:@L> <lhs:AddSub> <op:AddSubOp> <rhs:BitOp> <end:@R> => {
+        lhs.bin_op(begin, op, rhs, end)
+    },
+    <BitOp>,
+};
+AddSubOp: RpnCommand = {
+    "+" => RpnCommand::Add,
+    "-" => RpnCommand::Sub,
+};
+
+BitOp: Expression<'fstack> = {
+    // TODO
+    <UnsignedRightShift>,
+};
+
+UnsignedRightShift: Expression<'fstack> = {
+    // TODO
+    <RightShift>,
+};
+
+RightShift: Expression<'fstack> = {
+    // TODO
+    <LeftShift>,
+};
+
+LeftShift: Expression<'fstack> = {
+    // TODO
+    <Factor>,
+};
+
+Factor: Expression<'fstack> = {
+    <begin:@L> <lhs:Factor> <op:FactorOp> <rhs:Unaries> <end:@R> => {
+        lhs.bin_op(begin, op, rhs, end)
+    },
+    <Unaries>,
+};
+FactorOp: RpnCommand = {
+    "*" => RpnCommand::Mul,
+    "/" => RpnCommand::Div,
+    "%" => RpnCommand::Mod,
+};
+
+Unaries: Expression<'fstack> = {
+    <begin:@L> <op:UnariesOp> <expr:Unaries> <end:@R> => {
+        expr.unary_op(begin, RpnCommand::Complement, end)
+    },
+    <begin:@L> "+" <mut expr:Unaries> => { expr.begin = begin; expr },
+    <Exponent>,
+};
+UnariesOp: RpnCommand = {
+    "~" => RpnCommand::Complement,
+    "-" => RpnCommand::Neg,
+};
+
+Exponent: Expression<'fstack> = {
+    <begin:@L> <raised:Exponent> "**" <exponent:NumFuncCall> <end:@R> => {
+        raised.bin_op(begin, RpnCommand::Exponent, exponent, end)
+    },
+    <NumFuncCall>,
+};
+
+NumFuncCall: Expression<'fstack> = {
+    // TODO
+    <Term>,
+};
+
+Term: Expression<'fstack> = {
+    <begin:@L> <value:number> <end:@R> => Expression::constant(begin, end, value),
+    "(" <NumExpr> ")" => <>,
+};
+
+
+// Hacks around lexer ↔ parser interaction.
+
+MacroName: SourceString = <identifier> => {
+    todo!(); // Switch lexer mode to "raw".
+    <>
+};
+
+ProtectingDef: () = {
+    "def" => {
+        lexer.borrow_mut().expand_strings = false;
+    }
+};
+DefProtectedIdent: (Location<'fstack>, SourceString, Location<'fstack>) = {
+    ProtectingDef lookahead_hack <begin:@L> <ident:identifier> <end:@R> => {
+        lexer.borrow_mut().expand_strings = true;
+        (begin, ident, end)
+    }
+};
+DefIdent: (Location<'fstack>, SourceString, Location<'fstack>) = {
+    <DefProtectedIdent> lookahead_hack,
+};
+
+ProtectingRedef: () = {
+    "redef" => {
+        lexer.borrow_mut().expand_strings = false;
+    }
+};
+RedefProtectedIdent: (Location<'fstack>, SourceString, Location<'fstack>) = {
+    ProtectingRedef lookahead_hack <begin:@L> <ident:identifier> <end:@R> => {
+        lexer.borrow_mut().expand_strings = true;
+        (begin, ident, end)
+    }
+};
+RedefIdent: (Location<'fstack>, SourceString, Location<'fstack>) = {
+    <RedefProtectedIdent> lookahead_hack,
+};
+
+
+// Some "utility" rules.
+
+Reg8: Reg8 = {
+    B => Reg8::B,
+    C => Reg8::C,
+    D => Reg8::D,
+    E => Reg8::E,
+    H => Reg8::H,
+    L => Reg8::L,
+    "[" "hl" "]" => Reg8::HlInd,
+    A => Reg8::A,
+};
+
+B: () = { "b", "high" "(" "bc" ")" };
+C: () = { "c", "low" "(" "bc" ")" };
+
+D: () = { "d", "high" "(" "de" ")" };
+E: () = { "e", "low" "(" "de" ")" };
+
+H: () = { "h", "high" "(" "hl" ")" };
+L: () = { "l", "low" "(" "hl" ")" };
+
+A: () = { "a", "high" "(" "af" ")" };
+
+Reg16: Reg16 = {
+    "bc" => Reg16::Bc,
+    "de" => Reg16::De,
+    "hl" => Reg16::Hl,
+    "sp" => Reg16::Sp,
+};
+
+Reg16Ind: Reg16Ind = {
+    "bc" => Reg16Ind::Bc,
+    "de" => Reg16Ind::De,
+    HlInc => Reg16Ind::Hli,
+    HlDec => Reg16Ind::Hld,
+};
+
+HlInc: () = {
+    "hli",
+    "hl" "+",
+};
+
+HlDec: () = {
+    "hld",
+    "hl" "-",
+};
+
+Reg16Stack: Reg16Stack = {
+    "bc" => Reg16Stack::Bc,
+    "de" => Reg16Stack::De,
+    "hl" => Reg16Stack::Hl,
+    "af" => Reg16Stack::Af,
+};
+
+Condition: Condition = {
+    "nz" => Condition::Nz,
+    "z" => Condition::Z,
+    "nc" => Condition::Nc,
+    "c" => Condition::C,
+    ! <Condition> => !<>,
+};
+
+
+// The lexer interface.
+
+extern {
+    type Location = Location<'fstack>;
+    type Error = AsmError<'fstack>;
+
+    enum Token {
+        number => Token::Number(<u32>),
+        string => Token::String(<SourceString>),
+
+        // Punctuation.
+        "." => Token::Period,
+        "," => Token::Comma,
+        ":" => Token::Colon,
+        "[" => Token::LeftBracket,
+        "]" => Token::RightBracket,
+        "(" => Token::LeftParens,
+        ")" => Token::RightParens,
+        newline => Token::Newline,
+
+        // Operators.
+        "!" => Token::LogicNot,
+        "&&" => Token::LogicAnd,
+        "||" => Token::LogicOr,
+        ">" => Token::Gt,
+        "<" => Token::Lt,
+        ">=" => Token::Gte,
+        "<=" => Token::Lte,
+        "!=" => Token::LogicNe,
+        "==" => Token::LogicEq,
+        "+" => Token::Plus,
+        "-" => Token::Minus,
+        "*" => Token::Mul,
+        "/" => Token::Div,
+        "%" => Token::Mod,
+        "**" => Token::Exponent,
+        "<<" => Token::Shl,
+        ">>" => Token::Shr,
+        ">>>" => Token::UShr,
+        "|" => Token::BitOr,
+        "^" => Token::BitXor,
+        "&" => Token::BitAnd,
+        "~" => Token::Complement,
+
+        // Built-in label/section functions.
+        "def" => Token::Def,
+        "bank" => Token::Bank,
+        "align" => Token::Align,
+        "sizeof" => Token::Sizeof,
+        "startof" => Token::Startof,
+
+        "sin" => Token::Sin,
+        "cos" => Token::Cos,
+        "tan" => Token::Tan,
+        "asin" => Token::Asin,
+        "acos" => Token::Acos,
+        "atan" => Token::Atan,
+        "atan2" => Token::Atan2,
+        "fmul" => Token::FMul,
+        "fdiv" => Token::FDiv,
+        "fmod" => Token::FMod,
+        "pow" => Token::Pow,
+        "log" => Token::Log,
+        "round" => Token::Round,
+        "ceil" => Token::Ceil,
+        "floor" => Token::Floor,
+
+        "high" => Token::High,
+        "low" => Token::Low,
+        "isconst" => Token::IsConst,
+
+        "strcmp" => Token::Strcmp,
+        "strin" => Token::Strin,
+        "strrin" => Token::Strrin,
+        "strsub" => Token::Strsub,
+        "strlen" => Token::Strlen,
+        "strcat" => Token::Strcat,
+        "strupr" => Token::Strupr,
+        "strlwr" => Token::Strlwr,
+        "strrpl" => Token::Strrpl,
+        "strfmt" => Token::Strfmt,
+
+        "charlen" => Token::Charlen,
+        "charsub" => Token::Charsub,
+
+        label => Token::Label(<SourceString>),
+        identifier => Token::Identifier(<SourceString>),
+        local_ident => Token::LocalIdent(<SourceString>),
+        anon_label_ref => Token::AnonLabelRef(<u32>, <bool>),
+
+        // Assignment operators.
+        "equ" => Token::Equ,
+        "=" => Token::Eq,
+        "rb" => Token::Rb,
+        "rw" => Token::Rw,
+        // No `Rl` here because it's also an instruction.
+        "equs" => Token::Equs,
+
+        // Compound assignment operators.
+        "+=" => Token::AddEq,
+        "-=" => Token::SubEq,
+        "*=" => Token::MulEq,
+        "/=" => Token::DivEq,
+        "%=" => Token::ModEq,
+        "<<=" => Token::ShlEq,
+        ">>=" => Token::ShrEq,
+        ">>>=" => Token::UShrEq,
+        "|=" => Token::OrEq,
+        "^=" => Token::XorEq,
+        "&=" => Token::AndEq,
+
+        // Directives.
+        "rsreset" => Token::Rsreset,
+        "rsset" => Token::Rsset,
+        "redef" => Token::Redef,
+        "export" => Token::Export,
+        "purge" => Token::Purge,
+        "print" => Token::Print,
+        "println" => Token::Println,
+        "if" => Token::If,
+        "elif" => Token::Elif,
+        "else" => Token::Else,
+        "endc" => Token::Endc,
+        "macro" => Token::Macro,
+        "shift" => Token::Shift,
+        "endm" => Token::Endm,
+        "rept" => Token::Rept,
+        "for" => Token::For,
+        "break" => Token::Break,
+        "endr" => Token::Endr,
+        "section" => Token::Section,
+        "fragment" => Token::Fragment,
+        "load" => Token::Load,
+        "endl" => Token::Endl,
+        "pushs" => Token::Pushs,
+        "pops" => Token::Pops,
+        "union" => Token::Union,
+        "next" => Token::Next,
+        "endu" => Token::Endu,
+        "ds" => Token::Ds,
+        "db" => Token::Db,
+        "dw" => Token::Dw,
+        "dl" => Token::Dl,
+        "include" => Token::Include,
+        "incbin" => Token::Incbin,
+        "charmap" => Token::Charmap,
+        "newcharmap" => Token::Newcharmap,
+        "setcharmap" => Token::Setcharmap,
+        "pushc" => Token::Pushc,
+        "popc" => Token::Popc,
+        "fail" => Token::Fail,
+        "warn" => Token::Warn,
+        "fatal" => Token::Fatal,
+        "assert" => Token::Assert,
+        "static_assert" => Token::StaticAssert,
+        "opt" => Token::Opt,
+        "pusho" => Token::Pusho,
+        "popo" => Token::Popo,
+
+        // Memory types.
+        "rom0" => Token::Rom0,
+        "romx" => Token::Romx,
+        "vram" => Token::Vram,
+        "sram" => Token::Sram,
+        "wram0" => Token::Wram0,
+        "wramx" => Token::Wramx,
+        "oam" => Token::Oam,
+        "hram" => Token::Hram,
+
+        // Instructions.
+        "adc" => Token::Adc,
+        "add" => Token::Add,
+        "and" => Token::And,
+        "bit" => Token::Bit,
+        "call" => Token::Call,
+        "ccf" => Token::Ccf,
+        "cp" => Token::Cp,
+        "cpl" => Token::Cpl,
+        "daa" => Token::Daa,
+        "dec" => Token::Dec,
+        "di" => Token::Di,
+        "ei" => Token::Ei,
+        "halt" => Token::Halt,
+        "inc" => Token::Inc,
+        "jp" => Token::Jp,
+        "jr" => Token::Jr,
+        "ld" => Token::Ld,
+        "ldi" => Token::Ldi,
+        "ldd" => Token::Ldd,
+        "ldh" => Token::Ldh,
+        "nop" => Token::Nop,
+        "or" => Token::Or,
+        "pop" => Token::Pop,
+        "push" => Token::Push,
+        "res" => Token::Res,
+        "ret" => Token::Ret,
+        "reti" => Token::Reti,
+        "rst" => Token::Rst,
+        "rl" => Token::Rl,
+        "rla" => Token::Rla,
+        "rlc" => Token::Rlc,
+        "rlca" => Token::Rlca,
+        "rr" => Token::Rr,
+        "rra" => Token::Rra,
+        "rrc" => Token::Rrc,
+        "rrca" => Token::Rrca,
+        "sbc" => Token::Sbc,
+        "scf" => Token::Scf,
+        "set" => Token::Set,
+        "stop" => Token::Stop,
+        "sla" => Token::Sla,
+        "sra" => Token::Sra,
+        "srl" => Token::Srl,
+        "sub" => Token::Sub,
+        "swap" => Token::Swap,
+        "xor" => Token::Xor,
+
+        // Registers.
+        "a" => Token::A,
+        "b" => Token::B,
+        "c" => Token::C,
+        "d" => Token::D,
+        "e" => Token::E,
+        "h" => Token::H,
+        "l" => Token::L,
+        "af" => Token::Af,
+        "bc" => Token::Bc,
+        "de" => Token::De,
+        "hl" => Token::Hl,
+        "sp" => Token::Sp,
+        "hld" => Token::Hld,
+        "hli" => Token::Hli,
+
+        // Conditions.
+        "nz" => Token::Nz,
+        "z" => Token::Z,
+        "nc" => Token::Nc, // No `C` here because it's already a register.
+
+        lookahead_hack => Token::LookaheadHack,
+    }
+}
