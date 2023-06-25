@@ -59,6 +59,9 @@ fn idx(node_id: NonZeroUsize) -> usize {
     node_id.get() - 1
 }
 
+/// Convenience shorthand.
+pub type DiagInfo = Option<(usize, Range<usize>)>;
+
 impl Fstack {
     pub fn new(root_file: Rc<Storage>) -> Self {
         let this = Self(RefCell::new(FstackImpl {
@@ -69,10 +72,7 @@ impl Fstack {
         this
     }
 
-    pub fn make_diag_info(
-        begin: &Location<'_>,
-        end: Option<&Location<'_>>,
-    ) -> Option<(usize, Range<usize>)> {
+    pub fn make_diag_info(begin: &Location<'_>, end: Option<&Location<'_>>) -> DiagInfo {
         // A lack of handle means a "default" location, which should be mapped to the root node,
         // which is necessarily a file, and that always has some storage.
         if !begin.handle().map_or(true, |handle| {

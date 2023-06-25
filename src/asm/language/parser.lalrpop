@@ -12,7 +12,7 @@ use crate::{
     instructions::*,
     language::WarningKind,
     macro_args::MacroArgs,
-    sections::{SectionAttributes, Sections},
+    sections::{SectConstraints, SectionAttributes, Sections},
     SourceString,
     symbols::Symbols,
 };
@@ -282,7 +282,11 @@ PurgeSymName: () = {
 
 SectionDef: () = {
     <begin:@L> "section" <modifier:SectModifier> <name:StringExpr> "," <kind:SectKind> <addr:SectAddress?> <attrs:SectAttributes> <end:@R> => {
-        if let Err(err) = sections.borrow_mut().add_section(name, kind, modifier, addr, attrs, begin, end, &symbols.borrow(), macro_args.borrow().last()) {
+        let mut sections = sections.borrow_mut();
+
+        if let Err(err) = SectConstraints::try_new(
+            kind, addr, attrs, begin, end, &symbols.borrow(), macro_args.borrow().last(), &mut sections,
+        ).and_then(|(attrs, begin, end)| sections.add_section(name, kind, modifier, attrs, begin, end,)) {
             reporter.borrow_mut().report_error(fstack, err.into());
         }
     }

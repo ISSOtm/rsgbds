@@ -1,13 +1,15 @@
 use std::{
     fmt::{Display, Write},
-    ops::Range,
     write,
 };
 
 use codespan_reporting::diagnostic::{Diagnostic, Label};
 use lalrpop_util::lalrpop_mod;
 use parse_display::Display;
-use rgbds::{rpn::EvalError, section::Kind as SectionKind};
+use rgbds::{
+    rpn::EvalError,
+    section::{Kind as SectionKind, Modifier},
+};
 
 mod lexer;
 pub use lexer::{Lexer, Location, Tokenizer};
@@ -17,7 +19,7 @@ mod tokens;
 use tokens::Token;
 use warnings_gen::Warnings;
 
-use crate::{input::SourceString, instructions::BadInstructionKind};
+use crate::{fstack::DiagInfo, input::SourceString, instructions::BadInstructionKind};
 
 pub type ParseError<'fstack> =
     lalrpop_util::ParseError<Location<'fstack>, Token, AsmError<'fstack>>;
@@ -212,9 +214,7 @@ pub enum AsmErrorKind {
 
     // Semantic errors.
     #[display("{0} is already defined")]
-    SectAlreadyDefined(SourceString, Option<(usize, Range<usize>)>),
-    #[display("{0} is already defined")]
-    SymAlreadyDefined(SourceString, Option<(usize, Range<usize>)>),
+    SymAlreadyDefined(SourceString, DiagInfo),
     #[display("Only labels can be local")]
     IllegalLocal,
     #[display("Symbol \"{0}\" does not exist")]
@@ -231,7 +231,54 @@ pub enum AsmErrorKind {
     #[display("{0}")]
     EvalError(EvalError<SymEvalErrKind>),
 
-    // Section specification errors.
+    // Section definition errors.
+    #[display("{0} is already defined")]
+    SectAlreadyDefined(SourceString, DiagInfo),
+    #[display("{0} has already been defined as {1} section")]
+    DifferentSectMod(SourceString, Modifier, DiagInfo),
+    #[display("{0} has already been defined as a {1} section")]
+    DifferentSectKind(SourceString, SectionKind, DiagInfo),
+    // TODO: many of these "conflict" errors do not report which of the other definitions they conflict with;
+    //       mainly because this would require tracking source info with much more granularity.
+    #[display("Cannot define a {0} section as union")]
+    RomUnion(SectionKind),
+    #[display("Conflicting banks specified for {name}")]
+    DifferentBank {
+        name: SourceString,
+        expected: u32,
+        got: u32,
+    },
+    #[display("Address specified for {name} conflicts with earlier definition")]
+    ConflictingAddrs {
+        name: SourceString,
+        expected: u16,
+        got: u16,
+    },
+    #[display("Address specified for {name} conflicts with earlier definition")]
+    MisalignedAddr {
+        name: SourceString,
+        addr: u16,
+        align: u8,
+        align_ofs: u16,
+    },
+    #[display("Alignment specified for {name} conflicts with earlier definition")]
+    ConflictingAlignment {
+        name: SourceString,
+        align: u8,
+        align_ofs: u16,
+        addr: u16,
+    },
+    #[display("Alignment specified for {name} conflicts with earlier definition")]
+    IncompatibleAlignments {
+        name: SourceString,
+        align: u8,
+        align_ofs: u16,
+        new_align: u8,
+        new_align_ofs: u16,
+        expected_ofs: u16,
+    },
+
+    // Section constraint errors.
     #[display("An address must be in 16-bit range, not ${0:04x}")]
     AddrOutOfRange(i32),
     #[display("Alignment must be between 0 and 16 (inclusive), not {0}")]
@@ -311,13 +358,29 @@ impl AsmErrorKind {
                 c.escape_debug(),
                 d.escape_debug()
             )],
+
             Self::BadInstruction(kind) => kind.notes(),
             Self::Unbanked(..) => vec![
                 "BANK[...] is only allowed for ROMX, VRAM, SRAM, and WRAMX sections".to_string(),
             ],
-            Self::AlignMismatch(addr, align, _) => vec![format!(
-                "ALIGN[{align}, {}] would work",
-                addr & ((1 << align) - 1)
+            Self::DifferentBank { expected, got, .. } => vec![format!(
+                "Expected {expected}\n     got {got}"
+            )],
+            Self::ConflictingAddrs { expected, got, .. } => vec![format!(
+                "Expected ${expected:04X}\n     got ${got:04X}"
+            )],
+            Self::MisalignedAddr { addr, align, align_ofs, .. } => vec![format!(
+                "Address ${addr:04X} is ALIGN[{align}, {}]\n         expected ALIGN[{align}, {align_ofs}]",
+                addr % (1 << align),
+            )],
+            Self::ConflictingAlignment { align, align_ofs, addr, .. } => vec![format!(
+                "Address ${addr:04X} is ALIGN[{align}, {}]\n              expected ALIGN[{align}, {align_ofs}]",
+                addr % (1 << align),
+            )],
+            Self::IncompatibleAlignments { align, align_ofs, new_align, new_align_ofs, expected_ofs, .. } => vec![format!(
+                "Section is ALIGN[{align}, {align_ofs}] at this point\n       got ALIGN[{new_align}, {new_align_ofs}]"
+            ), format!(
+                "ALIGN[{new_align}, {expected_ofs}] would work instead"
             )],
 
             _ => vec![],
@@ -326,18 +389,15 @@ impl AsmErrorKind {
 
     pub fn labels(&self, labels: &mut Vec<Label<usize>>) {
         match self {
-            Self::SectAlreadyDefined(_, prev_def_info) => {
+            Self::SectAlreadyDefined(_, prev_def_info)
+            | Self::DifferentSectMod(_, _, prev_def_info)
+            | Self::DifferentSectKind(_, _, prev_def_info)
+            | Self::SymAlreadyDefined(_, prev_def_info) => {
                 if let Some((file_id, range)) = prev_def_info {
                     labels.push(
                         Label::secondary(*file_id, range.clone())
                             .with_message("Previously defined here"),
                     );
-                }
-            }
-            Self::SymAlreadyDefined(_, prev_def_info) => {
-                if let Some((file_id, range)) = prev_def_info {
-                    labels.extend_from_slice(&[Label::secondary(*file_id, range.clone())
-                        .with_message("Previously defined here")]);
                 }
             }
 

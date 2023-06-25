@@ -1,14 +1,14 @@
 pub mod rpn;
 pub mod section;
 
-#[derive(Debug, Clone, Copy, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ExportLevel {
     Local,
     Import,
     Export,
 }
 
-#[derive(Debug, Clone, Copy, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum RelocKind {
     /// 1-byte.
     Byte = 0,

@@ -526,7 +526,7 @@ mod tests {
 
             for dividend in i32::MIN..=i32::MAX {
                 let (quotient, remainder) =
-                    div_floor(dividend, divisor).expect("Division should succeed");
+                    div_floor::<()>(dividend, divisor).expect("Division should succeed");
                 assert_eq!(
                     quotient.wrapping_mul(divisor).wrapping_add(remainder),
                     dividend,

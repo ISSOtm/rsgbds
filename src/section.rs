@@ -2,7 +2,7 @@ use std::ops::RangeInclusive;
 
 use parse_display::Display;
 
-#[derive(Debug, Clone, Copy, Hash, Display)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Display)]
 #[display(style = "UPPERCASE")]
 pub enum Kind {
     Wram0 = 0,
@@ -72,7 +72,7 @@ impl Kind {
     }
 }
 
-#[derive(Debug, Clone, Copy, Hash, Display)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Display)]
 pub enum Modifier {
     Normal,
     Union,

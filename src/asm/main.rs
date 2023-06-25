@@ -1,4 +1,4 @@
-use std::{cell::RefCell, fs::File, rc::Rc};
+use std::{cell::RefCell, fs::File, process::ExitCode, rc::Rc};
 
 mod error;
 use error::Reporter;
@@ -16,7 +16,7 @@ use sections::Sections;
 mod symbols;
 use symbols::Symbols;
 
-fn main() {
+fn main() -> ExitCode {
     // TODO: arg parsing
 
     // TODO: colour choice
@@ -46,5 +46,8 @@ fn main() {
         Tokenizer::new(&fstack, &lexer, &macro_args, &reporter, &symbols),
     ) {
         reporter.get_mut().report_fatal_error(&fstack, error);
+        return ExitCode::FAILURE;
     };
+
+    ExitCode::SUCCESS
 }

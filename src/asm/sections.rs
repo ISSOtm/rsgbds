@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, debug_assert};
 
 use rgbds::{
     rpn::Rpn,
@@ -9,7 +9,7 @@ use string_interner::{backend::StringBackend, symbol::SymbolU32, StringInterner}
 
 use crate::{
     expr::{ByteOrExpr, Expression},
-    fstack::Fstack,
+    fstack::{DiagInfo, Fstack},
     input::SourceString,
     language::{AsmError, AsmErrorKind, Location, Warning},
     macro_args::MacroArgs,
@@ -43,37 +43,75 @@ impl<'fstack> Sections<'fstack> {
         name_string: SourceString,
         kind: Kind,
         modifier: Modifier,
-        address: Option<Expression<'fstack>>,
-        attrs: SectionAttributes<'fstack>,
+        attrs: SectConstraints,
         def_begin: Location<'fstack>,
         def_end: Location<'fstack>,
-        symbols: &Symbols,
-        macro_args: Option<&MacroArgs>,
     ) -> Result<(), AsmError<'fstack>> {
+        use std::collections::hash_map::Entry;
+
+        // TODO: bail if any UNION is active
+
         let name = self.names.get_or_intern(&name_string);
-        // `try_insert` would be nicer, but it's unstable for now.
-        if let Some(other) = self.sections.get(&name) {
-            // TODO: merging
+        let offset = match self.sections.entry(name) {
+            Entry::Occupied(mut entry) => {
+                fn conflict<F: FnOnce(DiagInfo) -> AsmErrorKind>(
+                    other_def: &(Location<'_>, Location<'_>),
+                    err_constructor: F,
+                ) -> Result<usize, AsmErrorKind> {
+                    let other_def_info = Fstack::make_diag_info(&other_def.0, Some(&other_def.1));
+                    Err(err_constructor(other_def_info))
+                }
 
-            let other_def_info =
-                Fstack::make_diag_info(&other.definition.0, Some(&other.definition.1));
-            return Err(AsmError {
-                begin: def_begin,
-                end: def_end,
-                kind: AsmErrorKind::SectAlreadyDefined(name_string, other_def_info),
-            });
-        }
+                let current = entry.get_mut();
+                match current.modifier {
+                    Modifier::Normal => conflict(&current.definition, |other_def_info| {
+                        AsmErrorKind::SectAlreadyDefined(name_string, other_def_info)
+                    }),
+                    _ if current.modifier != modifier => {
+                        conflict(&current.definition, |other_def_info| {
+                            AsmErrorKind::DifferentSectMod(
+                                name_string,
+                                current.modifier,
+                                other_def_info,
+                            )
+                        })
+                    }
+                    _ if current.kind != kind => conflict(&current.definition, |other_def_info| {
+                        AsmErrorKind::DifferentSectKind(name_string, current.kind, other_def_info)
+                    }),
+                    Modifier::Union => {
+                        if kind.has_data() {
+                            Err(AsmErrorKind::RomUnion(kind))
+                        } else {
+                            // Start anew at the beginning of the section.
+                            current.attrs.merge(name_string, &attrs, 0) // Start over at the beginning.
+                        }
+                    }
+                    Modifier::Fragment => {
+                        current.attrs.merge(name_string, &attrs, current.len_virt)
+                    }
+                }
+                .map_err(|kind| AsmError {
+                    begin: def_begin,
+                    end: def_end,
+                    kind,
+                })
+            }
 
-        let (attrs, def_begin, def_end) = NormalizedSectAttrs::try_new(
-            kind, address, attrs, def_begin, def_end, symbols, macro_args, self,
-        )?;
-        self.sections.insert(
-            name,
-            SectionData::new(kind, modifier, (def_begin, def_end), attrs),
-        );
+            Entry::Vacant(entry) => {
+                entry.insert(SectionData::new(
+                    kind,
+                    modifier,
+                    (def_begin, def_end),
+                    attrs,
+                ));
+
+                Ok(0) // Start at the section's beginning, obviously.
+            }
+        }?;
 
         // Make the section "active".
-        *self.stack.last_mut().unwrap() = Some(ActiveSection::new(name));
+        *self.stack.last_mut().unwrap() = Some(ActiveSection::new(name, offset));
 
         Ok(())
     }
@@ -100,15 +138,13 @@ pub struct SectionData<'fstack> {
     kind: Kind,
     modifier: Modifier,
     definition: (Location<'fstack>, Location<'fstack>),
-    address: Option<u16>,
-    bank: Option<u32>,
-    alignment: u8,
-    align_offset: u16,
+    attrs: SectConstraints,
 
     patches: Vec<Relocation<'fstack>>,
     /// This vector is only used if `self.kind.has_data()`.
     data: Vec<u8>,
-    /// This is not redundant with `self.data.len()`, as the former is capped by the kind's size.
+    /// This is not redundant with `self.data.len()`, as the former is capped by the kind's size;
+    /// and "non-data" section kinds keep the `data` vector empty anyway.
     len_virt: usize,
 }
 
@@ -117,21 +153,13 @@ impl<'fstack> SectionData<'fstack> {
         kind: Kind,
         modifier: Modifier,
         definition: (Location<'fstack>, Location<'fstack>),
-        NormalizedSectAttrs {
-            address,
-            bank,
-            alignment,
-            align_offset,
-        }: NormalizedSectAttrs,
+        attrs: SectConstraints,
     ) -> Self {
         Self {
             kind,
             modifier,
             definition,
-            address,
-            bank,
-            alignment,
-            align_offset,
+            attrs,
 
             patches: vec![],
             data: vec![],
@@ -165,11 +193,11 @@ struct ActiveSection {
 }
 
 impl ActiveSection {
-    fn new(name: SymbolU32) -> Self {
+    fn new(name: SymbolU32, offset: usize) -> Self {
         Self {
             name,
 
-            offset: 0,
+            offset,
             pc_section: None,
             pc_offset: 0,
             label_scope: None,
@@ -182,7 +210,7 @@ pub struct SectionHandle<'a, 'fstack>(&'a ActiveSection, &'a SectionData<'fstack
 
 impl<'fstack> SectionHandle<'_, 'fstack> {
     pub fn try_get_pc(&self) -> Option<u16> {
-        self.1.address.map(|base_addr| {
+        self.1.attrs.address.map(|base_addr| {
             base_addr.wrapping_add(self.1.data.len().try_into().unwrap_or(u16::MAX))
         })
     }
@@ -281,15 +309,15 @@ pub struct SectionAttributes<'fstack> {
 }
 
 #[derive(Debug)]
-struct NormalizedSectAttrs {
+pub struct SectConstraints {
     address: Option<u16>,
     bank: Option<u32>,
     alignment: u8,
     align_offset: u16,
 }
 
-impl NormalizedSectAttrs {
-    fn try_new<'fstack>(
+impl SectConstraints {
+    pub fn try_new<'fstack>(
         kind: Kind,
         address: Option<Expression<'fstack>>,
         attrs: SectionAttributes<'fstack>,
@@ -299,8 +327,19 @@ impl NormalizedSectAttrs {
         macro_args: Option<&MacroArgs>,
         sections: &Sections,
     ) -> Result<(Self, Location<'fstack>, Location<'fstack>), AsmError<'fstack>> {
-        let banks = kind.banks(true);
+        let banks = kind.banks(true); // At assembly stage, we allow everything that may possibly be valid.
         let start_addr = kind.start_addr();
+
+        match attrs.bank {
+            Some(bank) if banks == (0..=0) => {
+                return Err(AsmError {
+                    begin: bank.begin,
+                    end: bank.end,
+                    kind: AsmErrorKind::Unbanked(kind),
+                });
+            }
+            _ => {} // OK!
+        }
 
         // First, "lower" the raw expressions into something easier to manipulate.
 
@@ -395,7 +434,10 @@ impl NormalizedSectAttrs {
 
         if alignment != 0 {
             debug_assert!(alignment <= 16);
-            let mask = u16::MAX >> (16 - alignment);
+            let mask = 1u16
+                .checked_shl(alignment.into())
+                .unwrap_or(0)
+                .wrapping_sub(1);
 
             if let Some(addr) = address {
                 if (addr & mask) != align_offset {
@@ -403,8 +445,7 @@ impl NormalizedSectAttrs {
                         begin: def_begin,
                         end: def_end,
                         kind: AsmErrorKind::AlignMismatch(addr, alignment, align_offset),
-                    }
-                    .into());
+                    });
                 }
                 alignment = 0; // Ignore alignment if the address already satisfies it.
             } else if start_addr & mask != 0 {
@@ -412,8 +453,7 @@ impl NormalizedSectAttrs {
                     begin: def_begin,
                     end: def_end,
                     kind: AsmErrorKind::OverAligned(alignment, kind),
-                }
-                .into());
+                });
             } else if alignment == 16 {
                 alignment = 0;
                 address = Some(16);
@@ -439,5 +479,104 @@ impl NormalizedSectAttrs {
             def_begin,
             def_end,
         ))
+    }
+
+    pub fn align_mask(&self) -> u16 {
+        // Safe because the alignment is capped to 15 on creation.
+        (1 << self.alignment) - 1
+    }
+
+    /// Tries to merge two sets of constraints, keeping the most restrictive of the two; however,
+    /// the `other` set lies `offset` bytes *after* `self`.
+    ///
+    /// On success, this function returns `offset`.
+    fn merge(
+        &mut self,
+        name: SourceString,
+        other: &Self,
+        offset: usize,
+    ) -> Result<usize, AsmErrorKind> {
+        // Some sanity checks, which should be enforced by the "normalisation" in the constructor.
+        fn check(target: &SectConstraints) {
+            debug_assert!(target.alignment < 16); // Otherwise u16::sh{l,r}(alignment) will be UB.
+            debug_assert_eq!(target.align_offset >> target.alignment, 0); // Alignment offset is strictly less than alignment size.
+        }
+        check(self);
+        check(other);
+
+        // Bank handling.
+        // If either is unspecified then the other one wins; otherwise, both must agree.
+        match (self.bank, other.bank) {
+            (Some(expected), Some(got)) => {
+                if expected != got {
+                    return Err(AsmErrorKind::DifferentBank {
+                        name,
+                        expected,
+                        got,
+                    });
+                }
+            }
+            // No-op if both are `None`, but let's let the optimiser decide how to handle that case.
+            (None, other_bank) => self.bank = other_bank,
+            (Some(_), None) => {} // The current constraint is stronger.
+        }
+
+        // Address handling.
+        // A fixed address is more restrictive than an alignment requirement.
+        if let Some(other_addr) = other.address {
+            if let Some(addr) = self.address {
+                // If both are fixed, they must be identical.
+                let expected = addr.wrapping_add(offset as u16);
+                if other_addr != expected {
+                    return Err(AsmErrorKind::ConflictingAddrs {
+                        name,
+                        expected,
+                        got: other_addr,
+                    });
+                }
+            } else if other_addr & self.align_mask()
+                != self.align_offset.wrapping_add(offset as u16) & self.align_mask()
+            {
+                // The address doesn't match the previous alignment spec.
+                return Err(AsmErrorKind::MisalignedAddr {
+                    name,
+                    addr: other_addr,
+                    align: self.alignment,
+                    align_ofs: self.align_offset,
+                });
+            } else {
+                self.address = Some(other_addr);
+            }
+        } else {
+            // We always to the alignment check, as it will pass anyway if the other's alignment is 0.
+
+            if let Some(addr) = self.address {
+                let expected_addr = addr.wrapping_add(offset as u16);
+                if expected_addr & other.align_mask() != other.align_offset {
+                    return Err(AsmErrorKind::ConflictingAlignment {
+                        name,
+                        align: other.alignment,
+                        align_ofs: other.align_offset,
+                        addr: expected_addr,
+                    });
+                }
+            } else {
+                let cur_ofs = self.align_offset.wrapping_add(offset as u16);
+
+                // TODO: I'm not entirely sure this formula is correct...
+                if other.align_offset & self.align_mask() != cur_ofs & other.align_mask() {
+                    return Err(AsmErrorKind::IncompatibleAlignments {
+                        name,
+                        align: self.alignment,
+                        align_ofs: cur_ofs & self.align_mask(),
+                        new_align: other.alignment,
+                        new_align_ofs: other.align_offset,
+                        expected_ofs: cur_ofs & other.align_mask(),
+                    });
+                }
+            }
+        }
+
+        Ok(offset)
     }
 }
