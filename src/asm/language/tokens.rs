@@ -1,8 +1,6 @@
 use keyword_trie_gen::keyword_trie;
 use parse_display::Display;
 
-use crate::input::SourceString;
-
 pub fn can_start_ident(ch: char) -> bool {
     matches!(ch, 'A'..='Z' | 'a'..='z' | '_')
 }
@@ -19,7 +17,7 @@ pub enum Token {
     #[display("number")]
     Number(u32),
     #[display("string")]
-    String(SourceString),
+    String(String),
 
     // Punctuation.
     #[display("\".\"")]
@@ -135,11 +133,11 @@ pub enum Token {
 
     // Identifiers.
     #[display("label")]
-    Label(SourceString),
+    Label(String),
     #[display("identifier")]
-    Identifier(SourceString),
+    Identifier(String),
     #[display("local identifier")]
-    LocalIdent(SourceString),
+    LocalIdent(String),
     #[display("anonymous label reference")]
     AnonLabelRef(u32, bool),
 

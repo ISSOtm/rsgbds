@@ -10,7 +10,6 @@ use string_interner::{backend::StringBackend, symbol::SymbolU32, StringInterner}
 use crate::{
     expr::{ByteOrExpr, Expression},
     fstack::{DiagInfo, Fstack},
-    input::SourceString,
     language::{AsmError, AsmErrorKind, Location, Warning},
     macro_args::MacroArgs,
     symbols::Symbols,
@@ -40,7 +39,7 @@ impl<'fstack> Sections<'fstack> {
 
     pub fn add_section(
         &mut self,
-        name_string: SourceString,
+        name_string: String,
         kind: Kind,
         modifier: Modifier,
         attrs: SectConstraints,
@@ -490,12 +489,7 @@ impl SectConstraints {
     /// the `other` set lies `offset` bytes *after* `self`.
     ///
     /// On success, this function returns `offset`.
-    fn merge(
-        &mut self,
-        name: SourceString,
-        other: &Self,
-        offset: usize,
-    ) -> Result<usize, AsmErrorKind> {
+    fn merge(&mut self, name: String, other: &Self, offset: usize) -> Result<usize, AsmErrorKind> {
         // Some sanity checks, which should be enforced by the "normalisation" in the constructor.
         fn check(target: &SectConstraints) {
             debug_assert!(target.alignment < 16); // Otherwise u16::sh{l,r}(alignment) will be UB.

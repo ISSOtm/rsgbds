@@ -10,7 +10,6 @@ use codespan_reporting::files::Files;
 use crate::{
     input::Storage,
     language::{Lexer, Location},
-    SourceString,
 };
 
 /// State in the fstack nodes is what needs to persist even after exiting the scope.
@@ -50,8 +49,8 @@ pub struct Node {
 
 #[derive(Debug)]
 enum NodeKind {
-    File(Rc<Storage>),
-    Macro((), Rc<SourceString>),
+    File(Storage),
+    Macro((), Rc<String>),
     Loop(u32),
 }
 
@@ -63,7 +62,7 @@ fn idx(node_id: NonZeroUsize) -> usize {
 pub type DiagInfo = Option<(usize, Range<usize>)>;
 
 impl Fstack {
-    pub fn new(root_file: Rc<Storage>) -> Self {
+    pub fn new(root_file: Storage) -> Self {
         let this = Self(RefCell::new(FstackImpl {
             nodes: vec![],
             cur_node_id: None,
@@ -159,12 +158,12 @@ impl Fstack {
         }
     }
 
-    pub fn push_file(&self, storage: Rc<Storage>, lexer: &mut Lexer) {
+    pub fn push_file(&self, storage: Storage, lexer: &mut Lexer) {
         self.push_new_node(NodeKind::File(storage));
         lexer.push_new_state();
     }
 
-    pub fn push_macro(&self, body: Rc<SourceString>, lexer: &mut Lexer) {
+    pub fn push_macro(&self, body: Rc<String>, lexer: &mut Lexer) {
         self.push_new_node(NodeKind::Macro((), body));
         lexer.push_new_state();
     }
@@ -180,7 +179,7 @@ impl Fstack {
 impl AsRef<str> for Node {
     fn as_ref(&self) -> &str {
         match &self.kind {
-            NodeKind::File(storage) => storage.deref().as_ref(),
+            NodeKind::File(storage) => storage.as_ref(),
             NodeKind::Macro(_, body) => body.as_ref(),
             NodeKind::Loop(_) => todo!(),
         }
@@ -198,10 +197,10 @@ impl Node {
         self.ref_count.set(count - 1);
     }
 
-    pub fn slice(&self, range: Range<usize>) -> SourceString {
+    pub fn slice(&self, range: Range<usize>) -> String {
         match &self.kind {
-            NodeKind::File(storage) => SourceString::from_storage(Rc::clone(storage), range),
-            NodeKind::Macro(_, body) => SourceString::new_sliced(body, range),
+            NodeKind::File(storage) => storage.as_ref()[range].to_owned(),
+            NodeKind::Macro(_, body) => body[range].to_owned(),
             NodeKind::Loop(_) => todo!(),
         }
     }
@@ -209,7 +208,7 @@ impl Node {
     pub fn storage_base_ofs(&self) -> usize {
         match &self.kind {
             NodeKind::File(_) => 0,
-            NodeKind::Macro(_, body) => SourceString::storage_base_ofs(body).unwrap_or(0), // The offset doesn't really matter if there is no storage.
+            NodeKind::Macro(_, body) => 0,
             NodeKind::Loop(_) => todo!(),
         }
     }
@@ -243,7 +242,7 @@ impl Node {
     fn storage(&self) -> Option<&Storage> {
         match &self.kind {
             NodeKind::File(storage) => Some(storage),
-            NodeKind::Macro(_, string) => SourceString::storage(string).map(Deref::deref),
+            NodeKind::Macro(_, string) => None, // TODO: not great, the location in the original source code is lost.
             NodeKind::Loop(_) => todo!(),
         }
     }
@@ -266,7 +265,7 @@ impl Binder<'_> {
 
 impl<'fstack> Files<'fstack> for Binder<'fstack> {
     type FileId = usize;
-    type Name = &'fstack SourceString;
+    type Name = &'fstack String;
     type Source = &'fstack str;
 
     fn name(

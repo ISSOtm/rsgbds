@@ -13,7 +13,6 @@ use crate::{
     language::WarningKind,
     macro_args::MacroArgs,
     sections::{SectConstraints, SectionAttributes, Sections},
-    SourceString,
     symbols::Symbols,
 };
 
@@ -76,7 +75,7 @@ MacroDef: () = {
         reporter.borrow_mut().report_error(fstack, err.into());
     }
 }
-MacroDefHeader: (Location<'fstack>, Location<'fstack>, SourceString) = {
+MacroDefHeader: (Location<'fstack>, Location<'fstack>, String) = {
     "macro" <begin:@L> <name:identifier> <end:@R> lookahead_hack => {
         let mut lexer = lexer.borrow_mut();
         lexer.expand_equs = true; // This was reset when lexing the `MACRO`.
@@ -171,11 +170,11 @@ MacroInvocation: () = {
     },
 }
 // This action code will be executed after the `lookahead_hack` token is obtained from the lexer.
-MacroName: SourceString = <identifier> => {
+MacroName: String = <identifier> => {
     lexer.borrow_mut().mode = LexerMode::Raw;
     <>
 };
-MacroArg: Rc<SourceString> = {
+MacroArg: Rc<String> = {
     <begin:@L> <string:string> <end:@R> => {
         if string.is_empty() {
             reporter.borrow_mut().warn(fstack, Warning { begin, end, kind: WarningKind::EmptyMacroArg });
@@ -607,7 +606,7 @@ NumExpr<T>: Expression<'fstack> = {
     // TODO: user-defined functions
     <BoolShortCircuit<T>>,
 }
-DefAnyIdent: SourceString = {
+DefAnyIdent: String = {
     // This identifier is followed by a ")", so the action will be run in time.
     <AnyIdent> => {
         // Cancel the effect of lexing the `def`.
@@ -724,18 +723,18 @@ NumOfs: Expression<'fstack> = {
 
 // String expressions.
 
-StringExpr: SourceString = {
+StringExpr: String = {
     <string>,
     "strsub" "(" <string:StringExpr> "," <start:NumExpr<Term>> <end:("," <NumExpr<Term>>)?> ")" => todo!(),
     "charsub" "(" <string:StringExpr> "," <ofs:NumExpr<Term>> ")" => todo!(),
     "strcat" "(" <(<StrcatArgs> ","?)?> ")" => {
-        <>.unwrap_or_else(SourceString::new)
+        <>.unwrap_or_else(String::new)
     },
 };
-StrcatArgs: SourceString = {
+StrcatArgs: String = {
     <StringExpr>,
     <mut accumulated:StrcatArgs> "," <string:StringExpr> => {
-        SourceString::concat(&mut accumulated, &string);
+        accumulated.push_str(&string);
         accumulated
     }
 }
@@ -743,7 +742,7 @@ StrcatArgs: SourceString = {
 
 // Some "utility" rules.
 
-AnyIdent: SourceString = {
+AnyIdent: String = {
     <identifier> lookahead_hack, // Code that doesn't care about the ident type does no lexer hacks.
     <local_ident>,
 }
@@ -760,23 +759,23 @@ CommaList<T>: Vec<T> = {
 // Hacks around lexer ↔ parser interaction.
 // See the definition of `Token::LookaheadHack` for details.
 
-DefProtectedIdent: (Location<'fstack>, SourceString, Location<'fstack>) = {
+DefProtectedIdent: (Location<'fstack>, String, Location<'fstack>) = {
     "def" <begin:@L> <ident:identifier> <end:@R> => {
         lexer.borrow_mut().expand_equs = true;
         (begin, ident, end)
     }
 }
-DefIdent: (Location<'fstack>, SourceString, Location<'fstack>) = {
+DefIdent: (Location<'fstack>, String, Location<'fstack>) = {
     <DefProtectedIdent> lookahead_hack,
 }
 
-RedefProtectedIdent: (Location<'fstack>, SourceString, Location<'fstack>) = {
+RedefProtectedIdent: (Location<'fstack>, String, Location<'fstack>) = {
     "redef" <begin:@L> <ident:identifier> <end:@R> => {
         lexer.borrow_mut().expand_equs = true;
         (begin, ident, end)
     }
 }
-RedefIdent: (Location<'fstack>, SourceString, Location<'fstack>) = {
+RedefIdent: (Location<'fstack>, String, Location<'fstack>) = {
     <RedefProtectedIdent> lookahead_hack,
 }
 
@@ -789,7 +788,7 @@ extern {
 
     enum Token {
         number => Token::Number(<u32>),
-        string => Token::String(<SourceString>),
+        string => Token::String(<String>),
 
         // Punctuation.
         "." => Token::Period,
@@ -868,9 +867,9 @@ extern {
         "charlen" => Token::Charlen,
         "charsub" => Token::Charsub,
 
-        label => Token::Label(<SourceString>),
-        identifier => Token::Identifier(<SourceString>),
-        local_ident => Token::LocalIdent(<SourceString>),
+        label => Token::Label(<String>),
+        identifier => Token::Identifier(<String>),
+        local_ident => Token::LocalIdent(<String>),
         anon_label_ref => Token::AnonLabelRef(<u32>, <bool>),
 
         // Assignment operators.

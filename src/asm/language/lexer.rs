@@ -3,7 +3,6 @@ use std::{cell::RefCell, dbg, debug_assert, debug_assert_eq, ops::Deref, rc::Rc}
 use crate::{
     error::Reporter,
     fstack::{Fstack, Node, NodeHandle},
-    input::SourceString,
     language::{tokens::can_start_ident, Warning},
     macro_args::MacroArgs,
     symbols::Symbols,
@@ -34,7 +33,7 @@ struct State {
 
 #[derive(Debug)]
 struct Expansion {
-    source: Rc<SourceString>,
+    source: Rc<String>,
     offset: usize,
     /// How many bytes long the text that triggered this expansion is.
     parent_skip: usize,
@@ -156,10 +155,7 @@ pub struct Tokenizer<'fstack, 'lexer, 'macro_args, 'reporter, 'syms> {
     macro_arg_scan_distance: usize,
 
     /// If `Some()`, shifted characters are "captured" into this string.
-    ///
-    /// The `bool` is set to `false` when capture begins, and to `true` every time the "expansion level" changes.
-    /// If `true` and a character must be captured, then the capture is made "owned" instead of zero-copy.
-    capture: Option<(SourceString, bool)>, // Capture shouldn't be active when changing states.
+    capture: Option<String>, // Capture shouldn't be active when changing states.
 
     /// Is the lexer at the beginning of the line?
     /// (If `true`, the lexer will next generate a [`LookaheadHack`][Token::LookaheadHack] token.)
@@ -240,7 +236,7 @@ impl<'fstack> Tokenizer<'fstack, '_, '_, '_, '_> {
         }
     }
 
-    fn try_get_macro_arg(&self, idx: u32) -> Result<Rc<SourceString>, AsmErrorKind> {
+    fn try_get_macro_arg(&self, idx: u32) -> Result<Rc<String>, AsmErrorKind> {
         if idx == 0 {
             Err(AsmErrorKind::NoMacroArg0)
         } else {
@@ -254,7 +250,7 @@ impl<'fstack> Tokenizer<'fstack, '_, '_, '_, '_> {
     fn read_putative_backslash_expansion<It: Iterator<Item = char>>(
         &self,
         mut iter: It,
-    ) -> Option<(Result<Rc<SourceString>, AsmErrorKind>, usize)> {
+    ) -> Option<(Result<Rc<String>, AsmErrorKind>, usize)> {
         Some(match iter.next()? {
             c @ '0'..='9' => {
                 let idx = c as u32 - '0' as u32; // Because `to_digit` is inconvenient here.
@@ -274,7 +270,7 @@ impl<'fstack> Tokenizer<'fstack, '_, '_, '_, '_> {
         })
     }
 
-    fn begin_expansion(lexer: &mut Lexer, source: Rc<SourceString>, trigger_len: usize) {
+    fn begin_expansion(lexer: &mut Lexer, source: Rc<String>, trigger_len: usize) {
         lexer.cur_state_mut().expansions.push(Expansion {
             source,
             offset: 0,
@@ -397,9 +393,6 @@ impl<'fstack> Tokenizer<'fstack, '_, '_, '_, '_> {
 
                     skip = expansion.parent_skip;
                     lexer.cur_state_mut().expansions.pop();
-                    if let Some((_, capture_disrupted)) = self.capture.as_mut() {
-                        *capture_disrupted = true;
-                    }
                     continue; // Retry with the parent.
                 }
                 let offset = expansion.offset;
@@ -436,17 +429,9 @@ impl<'fstack> Tokenizer<'fstack, '_, '_, '_, '_> {
     fn bump_capture(&mut self, should_capture: bool) {
         let c = self.bump_internal();
 
-        let (capture, capture_disrupted) =
-            self.capture.as_mut().expect("Unexpectedly not capturing!?");
+        let capture = self.capture.as_mut().expect("Unexpectedly not capturing!?");
         if should_capture {
-            // TODO: maybe only doing this if `c != <next char>` would be better; the check has to be cheap, though.
-            if *capture_disrupted {
-                SourceString::make_owned(capture); // This is a no-op if already owned.
-                *capture_disrupted = false; // The operation is idempotent, no need to do it again.
-            }
-            SourceString::push(capture, c);
-        } else {
-            *capture_disrupted = true;
+            capture.push(c);
         }
     }
 
@@ -459,22 +444,18 @@ impl<'fstack> Tokenizer<'fstack, '_, '_, '_, '_> {
         let lexer = self.lexer.borrow();
         let cur_state = lexer.cur_state();
         let start_ofs = cur_state.offset;
-        self.capture = Some((
-            match cur_state.expansions.last() {
-                Some(expansion) => SourceString::clone_empty(&expansion.source, expansion.offset),
-                None => self
-                    .cur_node_handle()
-                    .with_node(|node| node.slice(start_ofs..start_ofs)),
-            },
-            false,
-        ));
+        self.capture = Some(match cur_state.expansions.last() {
+            Some(expansion) => String::new(),
+            None => self
+                .cur_node_handle()
+                .with_node(|node| node.slice(start_ofs..start_ofs)),
+        });
     }
 
-    fn end_capture(&mut self) -> SourceString {
+    fn end_capture(&mut self) -> String {
         self.capture
             .take()
             .expect("Lexer ending capture without starting it!?")
-            .0
     }
 
     fn location(storage: Option<NodeHandle<'fstack>>, mut offset: usize) -> Location<'fstack> {
@@ -666,7 +647,7 @@ impl Tokenizer<'_, '_, '_, '_, '_> {
         loop {
             macro_rules! append {
                 ($ch:expr) => {
-                    SourceString::push(&mut self.capture.as_mut().unwrap().0, $ch);
+                    self.capture.as_mut().unwrap().push($ch);
                 };
             }
 
@@ -709,8 +690,8 @@ impl Tokenizer<'_, '_, '_, '_, '_> {
                             *cur_ofs += trigger_len;
                             match result {
                                 Ok(expansion) => {
-                                    let string = &mut self.capture.as_mut().unwrap().0;
-                                    SourceString::make_owned(string).push_str(&expansion);
+                                    let string = &mut self.capture.as_mut().unwrap();
+                                    string.push_str(&expansion);
                                 }
                                 Err(kind) => {
                                     let begin = self.cur_loc();
@@ -1060,7 +1041,7 @@ impl Tokenizer<'_, '_, '_, '_, '_> {
                                 true
                             } else {
                                 // An empty string.
-                                break 'string Ok(Token::String(SourceString::new()));
+                                break 'string Ok(Token::String(String::new()));
                             }
                         } else {
                             false
@@ -1212,7 +1193,7 @@ impl Tokenizer<'_, '_, '_, '_, '_> {
                     if self.peek() == Some('*') {
                         self.bump_capture(false);
                         // Pop off the `/`.
-                        SourceString::trim_end(&mut self.capture.as_mut().unwrap().0, 1);
+                        self.capture.as_mut().unwrap().pop();
                         todo!(); // Either duplicate `discard_block_comment` (meh), or temporarily disable the capture somehow.
                     }
                 }
@@ -1239,7 +1220,7 @@ impl Tokenizer<'_, '_, '_, '_, '_> {
                             } else {
                                 todo!(); // Report invalid char escape in macro
                             };
-                            SourceString::push(&mut self.capture.as_mut().unwrap().0, to_push);
+                            self.capture.as_mut().unwrap().push(to_push);
                         }
                     }
                 }
@@ -1261,7 +1242,7 @@ impl Tokenizer<'_, '_, '_, '_, '_> {
         let trimmed_len = string.trim_end_matches(is_whitespace).len();
         // Commas permit empty arguments (i.e. two commas separated by whitespace only).
         if trimmed_len != 0 || last_char == Some(',') {
-            SourceString::truncate(&mut string, trimmed_len);
+            String::truncate(&mut string, trimmed_len);
             Some(Token::String(string))
         } else {
             // This is a token that ends the line, and "raw mode" only lasts until the end of its line.
@@ -1312,7 +1293,7 @@ impl Tokenizer<'_, '_, '_, '_, '_> {
         };
         let mut body = self.end_capture();
         let read_len = body.len();
-        SourceString::trim_end(&mut body, end_tok_len);
+        body.truncate(read_len - end_tok_len);
 
         self.expand_macro_args = true;
         self.enable_interpolation = true;

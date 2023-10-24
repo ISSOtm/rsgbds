@@ -1,4 +1,4 @@
-use std::{cell::RefCell, fs::File, process::ExitCode, rc::Rc};
+use std::{cell::RefCell, fs::File, process::ExitCode};
 
 mod error;
 use error::Reporter;
@@ -6,7 +6,7 @@ mod expr;
 mod fstack;
 use fstack::Fstack;
 mod input;
-use input::{SourceString, Storage};
+use input::Storage;
 mod instructions;
 mod language;
 use language::{Lexer, Parser, Tokenizer};
@@ -26,10 +26,8 @@ fn main() -> ExitCode {
 
     let root_path = "/tmp/test.asm"; // TODO
     let root_file = File::open(root_path).expect("Failed to open root file"); // TODO: also support stdin/stdout
-    let root_file = Rc::new(
-        Storage::from_file(root_path.to_string().into(), &root_file)
-            .expect("Failed to read root file"),
-    );
+    let root_file = Storage::from_file(root_path.to_string().into(), &root_file)
+        .expect("Failed to read root file");
     let fstack = Fstack::new(root_file);
     let sections = RefCell::new(Sections::new());
     let symbols = RefCell::new(Symbols::new());

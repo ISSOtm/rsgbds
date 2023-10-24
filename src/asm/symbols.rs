@@ -4,7 +4,6 @@ use string_interner::{backend::StringBackend, symbol::SymbolU32, StringInterner,
 
 use crate::{
     fstack::Fstack,
-    input::SourceString,
     language::{AsmError, AsmErrorKind, Location, SymEvalErrKind},
     macro_args::MacroArgs,
     sections::Sections,
@@ -47,7 +46,7 @@ impl<'fstack> Symbols<'fstack> {
     fn def_non_reloc(
         &mut self,
         name_begin: Location<'fstack>,
-        name_string: SourceString,
+        name_string: String,
         name_end: Location<'fstack>,
         kind: SymbolKind,
         allow_redef: bool,
@@ -97,7 +96,7 @@ impl<'fstack> Symbols<'fstack> {
     pub fn def_constant(
         &mut self,
         name_begin: Location<'fstack>,
-        name_string: SourceString,
+        name_string: String,
         name_end: Location<'fstack>,
         value: i32,
         allow_redef: bool,
@@ -114,7 +113,7 @@ impl<'fstack> Symbols<'fstack> {
     pub fn def_variable(
         &mut self,
         name_begin: Location<'fstack>,
-        name_string: SourceString,
+        name_string: String,
         name_end: Location<'fstack>,
         value: i32,
     ) -> Result<(), AsmError<'fstack>> {
@@ -130,9 +129,9 @@ impl<'fstack> Symbols<'fstack> {
     pub fn def_string(
         &mut self,
         name_begin: Location<'fstack>,
-        name_string: SourceString,
+        name_string: String,
         name_end: Location<'fstack>,
-        string: Rc<SourceString>,
+        string: Rc<String>,
     ) -> Result<(), AsmError<'fstack>> {
         self.def_non_reloc(
             name_begin,
@@ -146,9 +145,9 @@ impl<'fstack> Symbols<'fstack> {
     pub fn def_macro(
         &mut self,
         name_begin: Location<'fstack>,
-        name_string: SourceString,
+        name_string: String,
         name_end: Location<'fstack>,
-        body: Rc<SourceString>,
+        body: Rc<String>,
     ) -> Result<(), AsmError<'fstack>> {
         self.def_non_reloc(
             name_begin,
@@ -161,14 +160,14 @@ impl<'fstack> Symbols<'fstack> {
 
     pub fn get_number(
         &self,
-        name_str: &SourceString,
+        name_str: &String,
         macro_args: Option<&MacroArgs>,
         sections: &Sections,
     ) -> Result<i32, SymEvalErrKind> {
         self.names
             .get(name_str)
             .and_then(|name| self.symbols.get(&name))
-            .ok_or_else(|| SymEvalErrKind::NoSuchSymbol(SourceString::clone(name_str)))?
+            .ok_or_else(|| SymEvalErrKind::NoSuchSymbol(String::clone(name_str)))?
             .get_number(name_str, macro_args, sections)
     }
 
@@ -190,7 +189,7 @@ impl<'fstack> Symbols<'fstack> {
         }
     }
 
-    pub fn get_string(&self, name_str: &SourceString) -> Result<&Rc<SourceString>, AsmErrorKind> {
+    pub fn get_string(&self, name_str: &String) -> Result<&Rc<String>, AsmErrorKind> {
         self.names
             .get(name_str)
             .and_then(|name| self.symbols.get(&name))
@@ -199,10 +198,7 @@ impl<'fstack> Symbols<'fstack> {
             .ok_or_else(|| AsmErrorKind::SymNotEqus(name_str.clone()))
     }
 
-    pub fn get_macro(
-        &self,
-        name_str: &SourceString,
-    ) -> Result<(SymbolU32, &Rc<SourceString>), AsmErrorKind> {
+    pub fn get_macro(&self, name_str: &String) -> Result<(SymbolU32, &Rc<String>), AsmErrorKind> {
         let (name, data) = self
             .names
             .get(name_str)
@@ -239,7 +235,7 @@ impl<'fstack> Symbols<'fstack> {
     /// On success, returns a unique identifier for that symbol.
     pub fn add_num_ref(
         &mut self,
-        name_str: &SourceString,
+        name_str: &String,
         begin: &Location<'fstack>,
         end: &Location<'fstack>,
     ) -> Result<u32, SymEvalErrKind> {
@@ -258,7 +254,7 @@ impl<'fstack> Symbols<'fstack> {
             Entry::Occupied(mut entry) => {
                 let symbol = entry.get_mut();
                 if !symbol.kind.is_numeric() {
-                    return Err(SymEvalErrKind::NotNumeric(SourceString::clone(name_str)).into());
+                    return Err(SymEvalErrKind::NotNumeric(String::clone(name_str)).into());
                 }
                 symbol.is_referenced = true;
             }
@@ -285,8 +281,8 @@ pub enum SymbolKind {
     },
     /// Empty reference, but only numeric types allow that.
     NumRef,
-    String(Rc<SourceString>),
-    Macro(Rc<SourceString>),
+    String(Rc<String>),
+    Macro(Rc<String>),
 
     // Special symbol types.
     Pc,
@@ -296,7 +292,7 @@ pub enum SymbolKind {
 impl SymbolData<'_> {
     fn get_number(
         &self,
-        name: &SourceString,
+        name: &String,
         macro_args: Option<&MacroArgs>,
         sections: &Sections<'_>,
     ) -> Result<i32, SymEvalErrKind> {
@@ -309,20 +305,20 @@ impl SymbolData<'_> {
                 .try_get_pc()
             {
                 Some(pc) => Ok(pc.into()),
-                None => Err(SymEvalErrKind::NonConst(SourceString::clone(name))),
+                None => Err(SymEvalErrKind::NonConst(String::clone(name))),
             },
             SymbolKind::Narg => match macro_args {
                 Some(args) => Ok(args.nb_args().try_into().expect("Macro has too many args!")),
                 None => Err(SymEvalErrKind::NargOutsideMacro),
             },
-            SymbolKind::NumRef => Err(SymEvalErrKind::NonConst(SourceString::clone(name))),
+            SymbolKind::NumRef => Err(SymEvalErrKind::NonConst(String::clone(name))),
             SymbolKind::String(_) | SymbolKind::Macro(_) => {
-                Err(SymEvalErrKind::NotNumeric(SourceString::clone(name)))
+                Err(SymEvalErrKind::NotNumeric(String::clone(name)))
             }
         }
     }
 
-    fn get_string(&self) -> Option<&Rc<SourceString>> {
+    fn get_string(&self) -> Option<&Rc<String>> {
         match &self.kind {
             SymbolKind::String(equs) => Some(equs),
             SymbolKind::Constant(..)
@@ -335,7 +331,7 @@ impl SymbolData<'_> {
         }
     }
 
-    fn get_macro(&self) -> Option<&Rc<SourceString>> {
+    fn get_macro(&self) -> Option<&Rc<String>> {
         match &self.kind {
             SymbolKind::Macro(body) => Some(body),
             SymbolKind::Constant(..)

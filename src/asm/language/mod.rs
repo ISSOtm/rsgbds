@@ -19,7 +19,7 @@ mod tokens;
 use tokens::Token;
 use warnings_gen::Warnings;
 
-use crate::{fstack::DiagInfo, input::SourceString, instructions::BadInstructionKind};
+use crate::{fstack::DiagInfo, instructions::BadInstructionKind};
 
 pub type ParseError<'fstack> =
     lalrpop_util::ParseError<Location<'fstack>, Token, AsmError<'fstack>>;
@@ -81,7 +81,7 @@ pub enum WarningKind {
     UnmappedChar { level: u8, ch: char },
     /// User warnings
     #[warning(default = true)]
-    User(SourceString),
+    User(String),
 
     #[warning(meta(
         BackwardsFor,
@@ -161,11 +161,11 @@ pub enum ObsoleteKind {
 #[derive(Debug, Display)]
 pub enum SymEvalErrKind {
     #[display("Symbol \"{0}\" does not exist")]
-    NoSuchSymbol(SourceString),
+    NoSuchSymbol(String),
     #[display("RGBASM cannot compute the value of \"{0}\" at this point")]
-    NonConst(SourceString), // TODO: say where it was defined?
+    NonConst(String), // TODO: say where it was defined?
     #[display("\"{0}\" is not a numeric symbol")]
-    NotNumeric(SourceString),
+    NotNumeric(String),
     #[display("\"_NARG\" is only defined inside of macros")]
     NargOutsideMacro,
     #[display("\"@\" is only defined within a section")]
@@ -214,63 +214,63 @@ pub enum AsmErrorKind {
 
     // Semantic errors.
     #[display("{0} is already defined")]
-    SymAlreadyDefined(SourceString, DiagInfo),
+    SymAlreadyDefined(String, DiagInfo),
     #[display("Only labels can be local")]
     IllegalLocal,
     #[display("Symbol \"{0}\" does not exist")]
-    NoSuchSymbol(SourceString),
+    NoSuchSymbol(String),
     // TODO: report the actual kind as "help"
     #[display("Symbol \"{0}\" is not a string constant")]
-    SymNotEqus(SourceString),
+    SymNotEqus(String),
     #[display("Symbol \"{0}\" is not a macro")]
-    SymNotMacro(SourceString),
+    SymNotMacro(String),
     #[display("Built-in symbol \"{0}\" cannot be purged")]
-    PurgingBuiltin(SourceString),
+    PurgingBuiltin(String),
     #[display("Symbol \"{0}\" is referenced and thus cannot be purged")]
-    PurgingReferenced(SourceString),
+    PurgingReferenced(String),
     #[display("{0}")]
     EvalError(EvalError<SymEvalErrKind>),
 
     // Section definition errors.
     #[display("{0} is already defined")]
-    SectAlreadyDefined(SourceString, DiagInfo),
+    SectAlreadyDefined(String, DiagInfo),
     #[display("{0} has already been defined as {1} section")]
-    DifferentSectMod(SourceString, Modifier, DiagInfo),
+    DifferentSectMod(String, Modifier, DiagInfo),
     #[display("{0} has already been defined as a {1} section")]
-    DifferentSectKind(SourceString, SectionKind, DiagInfo),
+    DifferentSectKind(String, SectionKind, DiagInfo),
     // TODO: many of these "conflict" errors do not report which of the other definitions they conflict with;
     //       mainly because this would require tracking source info with much more granularity.
     #[display("Cannot define a {0} section as union")]
     RomUnion(SectionKind),
     #[display("Conflicting banks specified for {name}")]
     DifferentBank {
-        name: SourceString,
+        name: String,
         expected: u32,
         got: u32,
     },
     #[display("Address specified for {name} conflicts with earlier definition")]
     ConflictingAddrs {
-        name: SourceString,
+        name: String,
         expected: u16,
         got: u16,
     },
     #[display("Address specified for {name} conflicts with earlier definition")]
     MisalignedAddr {
-        name: SourceString,
+        name: String,
         addr: u16,
         align: u8,
         align_ofs: u16,
     },
     #[display("Alignment specified for {name} conflicts with earlier definition")]
     ConflictingAlignment {
-        name: SourceString,
+        name: String,
         align: u8,
         align_ofs: u16,
         addr: u16,
     },
     #[display("Alignment specified for {name} conflicts with earlier definition")]
     IncompatibleAlignments {
-        name: SourceString,
+        name: String,
         align: u8,
         align_ofs: u16,
         new_align: u8,
