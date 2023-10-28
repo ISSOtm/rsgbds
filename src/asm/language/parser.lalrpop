@@ -210,7 +210,9 @@ Directive: () = {
             &runtime_opts.borrow().cur_options().warn_settings,
         )
     },
-    "fail" <msg:StringExpr> => todo!(),
+    "fail" <begin:@L> <msg:StringExpr> <end:@R> => {
+        reporter.borrow_mut().report_fatal_error(fstack, AsmError::new(begin, end, AsmErrorKind::Fail(msg)).into());
+    },
     "shift" <amount:NumExpr<Term>?> => todo!(),
     "assert",
     "static_assert",

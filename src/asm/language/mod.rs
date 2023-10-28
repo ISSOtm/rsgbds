@@ -244,6 +244,8 @@ pub enum AsmErrorKind {
     BadInstruction(BadInstructionKind),
 
     // Semantic errors.
+    #[display("{0}")]
+    Fail(String),
     #[display("{0} is already defined")]
     SymAlreadyDefined(String, DiagInfo),
     #[display("Only labels can be local")]
