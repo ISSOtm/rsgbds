@@ -25,8 +25,16 @@ mod impls {
     pub(crate) fn warnings(input: DeriveInput) -> Result<TokenStream, Error> {
         let id_enum_name = parse_input_attrs(&input)?;
 
-        let DeriveInput { data: Data::Enum(DataEnum { variants, .. }), ident : input_name, .. } = input else {
-            return Err(Error::new_spanned(input, "#[derive(Warnings)] can only be applied to an enum"));
+        let DeriveInput {
+            data: Data::Enum(DataEnum { variants, .. }),
+            ident: input_name,
+            ..
+        } = input
+        else {
+            return Err(Error::new_spanned(
+                input,
+                "#[derive(Warnings)] can only be applied to an enum",
+            ));
         };
 
         let warnings = variants
@@ -35,31 +43,90 @@ mod impls {
             .collect::<Result<Vec<_>, _>>()?;
 
         let mut warning_ids = Vec::with_capacity(warnings.len());
+        let mut handle_parse = Vec::with_capacity(warnings.len());
         for warning in &warnings {
             let base_ident = &warning.name;
             let pat_kind = warning.pat_kind;
+            let warning_name = to_kebab_case(&base_ident.to_string());
 
-            match warning.kind {
-                WarningKind::Boolean(default) => {
-                    warning_ids.push(WarningId {
+            match &warning.kind {
+                &WarningKind::Boolean(default) => {
+                    let warning_id = WarningId {
                         base_ident,
                         ident_suffix: None,
                         pat_kind,
                         default,
+                    };
+
+                    handle_parse.push(quote! {
+                        (#warning_name, None) => {
+                            levels[#id_enum_name::#warning_id as usize] = new_state;
+                            Ok(())
+                        }
                     });
+                    warning_ids.push(warning_id);
                 }
-                WarningKind::Numeric { max, default } => {
-                    warning_ids.extend((1..=max).map(move |i| WarningId {
+                &WarningKind::Numeric { max, default } => {
+                    let make_ident = move |i| WarningId {
                         base_ident,
                         ident_suffix: Some(i),
                         pat_kind,
                         default: i <= default,
-                    }));
+                    };
+
+                    let first_ident = make_ident(1);
+                    handle_parse.push(quote! {
+                        (#warning_name, arg) => {
+                            let level = match arg {
+                                Some(arg) => {
+                                    // `no-FLAG=1` is invalid.
+                                    if new_state == WarningState::Disabled {
+                                        return Err(AsmErrorKind::NegatedParametricWarning(#warning_name));
+                                    }
+
+                                    arg.parse().map_err(|err| AsmErrorKind::BadWarningArg {
+                                        flag: #warning_name.to_string(),
+                                        arg: arg.to_string(),
+                                        err,
+                                    })?
+                                }
+                                None => #default,
+                            };
+                            let base_id = #id_enum_name::#first_ident as usize;
+                            let (enable, disable) = levels[base_id..][..usize::from(#max)].split_at_mut(level.into());
+                            enable.fill(new_state);
+                            disable.fill(WarningState::Disabled);
+                            Ok(())
+                        }
+                    });
+
+                    warning_ids.extend((1..=max).map(make_ident));
                 }
-                WarningKind::Meta(..) => {}
+                WarningKind::Meta(enabled_warnings) => {
+                    let handle = match &enabled_warnings[..] {
+                        [single] if single == "Everything" => quote! {
+                            levels.fill(WarningState::Enabled);
+                        },
+                        warnings => quote! { #(
+                            levels[#id_enum_name::#warnings as usize] = WarningState::Enabled;
+                        )* },
+                    };
+
+                    handle_parse.push(quote! {
+                        (#warning_name, None) => {
+                            if new_state != WarningState::Enabled {
+                                Err(AsmErrorKind::ModifiedMetaWarning(#warning_name))
+                            } else {
+                                #handle
+                                Ok(())
+                            }
+                        }
+                    });
+                }
             }
         }
 
+        let ids_doc = format!("The numeric values corresponding to individual [`{input_name}`]s, for use to index the \"warning enabled?\" array. (This is also why \"meta\" warnings are not included.)");
         let vis = input.vis;
         let nb_warnings = warning_ids.len();
         let id_flags = warning_ids.iter().map(|id| format!("`-W{id}`"));
@@ -67,6 +134,7 @@ mod impls {
         let patterns = warning_ids.iter().map(WarningId::pat);
         let id_strings = warning_ids.iter().map(|id| format!("{id}"));
         Ok(quote! {
+            #[doc = #ids_doc]
             #[derive(Debug, Clone, Copy)]
             #vis enum #id_enum_name { #(
                 #[doc = #id_flags]
@@ -95,7 +163,38 @@ mod impls {
                     }
                 }
             }
+
+            impl #input_name {
+                #vis fn handle_flag(flag: &str, levels: &mut [WarningState], new_state: WarningState) -> Result<(), AsmErrorKind> {
+                    let (kind_name, arg) = match flag.split_once('=') {
+                        Some((kind_name, arg)) => (kind_name, Some(arg)),
+                        None => (flag, None),
+                    };
+
+                    match (kind_name, arg) {
+                        #( #handle_parse )*
+                        (kind_name, Some(arg)) => Err(AsmErrorKind::UnexpectedWarningArg(kind_name.to_string())),
+                        (kind_name, None) => Err(AsmErrorKind::UnknownWarningFlag(kind_name.to_string())),
+                    }
+                }
+            }
         })
+    }
+
+    fn to_kebab_case(original: &str) -> String {
+        let mut new = String::with_capacity(original.len());
+        let mut chars = original.chars();
+
+        if let Some(first) = chars.next() {
+            new.push(first.to_ascii_lowercase());
+            for c in chars {
+                if c.is_ascii_uppercase() {
+                    new.push('-');
+                }
+                new.push(c.to_ascii_lowercase());
+            }
+        }
+        new
     }
 
     struct Warning {
@@ -240,7 +339,10 @@ mod impls {
             .filter(|attr| attr.path.is_ident("warning"))
         {
             let Meta::List(args) = attr.parse_meta()? else {
-                return Err(Error::new_spanned(attr, "Expected `#[warning(list = \"of args\")]`"));
+                return Err(Error::new_spanned(
+                    attr,
+                    "Expected `#[warning(list = \"of args\")]`",
+                ));
             };
             for arg in args.nested {
                 match arg {
@@ -277,7 +379,10 @@ mod impls {
             .filter(|attr| attr.path.is_ident("warning"))
         {
             let Meta::List(args) = attr.parse_meta()? else {
-                return Err(Error::new_spanned(attr, "Expected `#[warning(list = \"of args\")]`"));
+                return Err(Error::new_spanned(
+                    attr,
+                    "Expected `#[warning(list = \"of args\")]`",
+                ));
             };
             for arg in args.nested {
                 match arg {

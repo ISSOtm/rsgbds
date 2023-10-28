@@ -1,5 +1,6 @@
 use std::{
     fmt::{Display, Write},
+    num::ParseIntError,
     write,
 };
 
@@ -9,7 +10,11 @@ use parse_display::Display;
 use rgbds::{
     rpn::EvalError,
     section::{Kind as SectionKind, Modifier},
+    ParseNumError,
 };
+use warnings_gen::Warnings;
+
+use crate::{error::WarningState, fstack::DiagInfo, instructions::BadInstructionKind};
 
 mod lexer;
 pub use lexer::{Lexer, Location, Tokenizer};
@@ -17,9 +22,6 @@ lalrpop_mod!(parser, "/asm/language/parser.rs");
 pub use parser::TranslationUnitParser as Parser;
 mod tokens;
 use tokens::Token;
-use warnings_gen::Warnings;
-
-use crate::{fstack::DiagInfo, instructions::BadInstructionKind};
 
 pub type ParseError<'fstack> =
     lalrpop_util::ParseError<Location<'fstack>, Token, AsmError<'fstack>>;
@@ -90,8 +92,7 @@ pub enum WarningKind {
         EmptyDataDirective,
         EmptyStrrpl,
         LargeConstant,
-        LongStr,
-        NestedComment,
+        NestedBlockComment,
         Obsolete,
         NumericString1,
         UnmappedChar1
@@ -174,10 +175,40 @@ pub enum SymEvalErrKind {
 
 #[derive(Debug, Display)]
 pub enum AsmErrorKind {
+    // Option errors.
+    #[display("Unknown option {0:?}")]
+    UnknownOption(char),
+    #[display("Option 'b' expects its argument to be exactly 2 characters, not {0}")]
+    BadOptBLen(usize),
+    #[display("Option 'g' expects its argument to be exactly 4 characters, not {0}")]
+    BadOptGLen(usize),
+    #[display("Bad arguemnt for option '{0}': {1}")]
+    BadOptArg(char, ParseNumError<u16>),
+    #[display("Option '{0}' does not take an argument")]
+    UnexpectedOptArg(char),
+    #[display("Option '{0}' cannot be disabled")]
+    CannotDisableOpt(char),
+    #[display("'!' expects the name of the option it should negate")]
+    NoOptToNegate,
+    #[display("Unknown warning flag \"{0}\"")]
+    UnknownWarningFlag(String),
+    #[display("Warning flag \"{0}\" does not take an argument")]
+    UnexpectedWarningArg(String),
+    #[display("Invalid argument \"{arg}\" for warning flag \"{flag}\": {err}")]
+    BadWarningArg {
+        flag: String,
+        arg: String,
+        err: ParseIntError,
+    },
+    #[display("Warning flag \"{0}\" can be either negated or given a level, but not both")]
+    NegatedParametricWarning(&'static str),
+    #[display("\"Meta\" warning flag \"{0}\" cannot have modifiers applied")]
+    ModifiedMetaWarning(&'static str),
+
     // Lexer errors.
     #[display("Syntax error: unexpected '{0}'")]
     BadChar(char),
-    #[display("Syntax error: macro argument is being used outside of a macro")]
+    #[display("Syntax error: a macro argument is being used outside of a macro")]
     NoActiveMacro,
     #[display("Syntax error: macro argument '\\0' does not exist")]
     NoMacroArg0,
@@ -203,9 +234,9 @@ pub enum AsmErrorKind {
     UnterminatedString,
     #[display("Syntax error: no hexadecimal digits found after '$'")]
     NoHexDigits,
-    #[display("Syntax error: no graphics \"digits\" found after '`'")]
+    #[display("Syntax error: no graphical \"digits\" found after '`'")]
     NoGfxChars([char; 4]),
-    #[display("Cannot escape '{0}'")]
+    #[display("Cannot escape {0:?}")]
     IllegalEscape(char),
     #[display("Character being escaped is missing")]
     IllegalEscapeEof,
@@ -230,6 +261,10 @@ pub enum AsmErrorKind {
     PurgingReferenced(String),
     #[display("{0}")]
     EvalError(EvalError<SymEvalErrKind>),
+    #[display("Option stack is empty, cannot pop an option")]
+    EmptyOptionStack,
+    #[display("Empty OPT directive")]
+    EmptyOpt,
 
     // Section definition errors.
     #[display("{0} is already defined")]

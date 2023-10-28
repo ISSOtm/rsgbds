@@ -5,6 +5,7 @@ use crate::{
     fstack::{Fstack, Node, NodeHandle},
     language::{tokens::can_start_ident, Warning},
     macro_args::MacroArgs,
+    opt::RuntimeOptStack,
     symbols::Symbols,
 };
 
@@ -18,8 +19,6 @@ use super::{
 pub struct Lexer {
     states: Vec<State>,
 
-    bin_digits: [char; 2],
-    gfx_digits: [char; 4],
     pub expand_equs: bool,
     pub mode: Mode,
 }
@@ -51,8 +50,6 @@ impl Lexer {
     pub fn new() -> Self {
         Self {
             states: vec![State::new()],
-            bin_digits: ['0', '1'],
-            gfx_digits: ['0', '1', '2', '3'],
             expand_equs: true, // Enabled by default.
             mode: Mode::Normal,
         }
@@ -139,7 +136,8 @@ impl PartialOrd for Location<'_> {
 }
 
 #[derive(Debug)]
-pub struct Tokenizer<'fstack, 'lexer, 'macro_args, 'reporter, 'syms> {
+pub struct Tokenizer<'opts, 'fstack, 'lexer, 'macro_args, 'reporter, 'syms> {
+    runtime_opts: &'opts RefCell<RuntimeOptStack>,
     fstack: &'fstack Fstack,
     lexer: &'lexer RefCell<Lexer>,
     macro_args: &'macro_args RefCell<Vec<MacroArgs>>,
@@ -185,10 +183,11 @@ macro_rules! line_cont_start {
     };
 }
 
-impl<'fstack, 'lexer, 'macro_args, 'reporter, 'syms>
-    Tokenizer<'fstack, 'lexer, 'macro_args, 'reporter, 'syms>
+impl<'opts, 'fstack, 'lexer, 'macro_args, 'reporter, 'syms>
+    Tokenizer<'opts, 'fstack, 'lexer, 'macro_args, 'reporter, 'syms>
 {
     pub fn new(
+        runtime_opts: &'opts RefCell<RuntimeOptStack>,
         fstack: &'fstack Fstack,
         lexer: &'lexer RefCell<Lexer>,
         macro_args: &'macro_args RefCell<Vec<MacroArgs>>,
@@ -196,6 +195,7 @@ impl<'fstack, 'lexer, 'macro_args, 'reporter, 'syms>
         symbols: &'syms RefCell<Symbols<'fstack>>,
     ) -> Self {
         Self {
+            runtime_opts,
             fstack,
             lexer,
             macro_args,
@@ -215,7 +215,7 @@ impl<'fstack, 'lexer, 'macro_args, 'reporter, 'syms>
 }
 
 /// Helper functions.
-impl<'fstack> Tokenizer<'fstack, '_, '_, '_, '_> {
+impl<'fstack> Tokenizer<'_, 'fstack, '_, '_, '_, '_> {
     fn cur_root_offset(&self) -> usize {
         self.lexer.borrow().cur_state().offset
     }
@@ -280,13 +280,14 @@ impl<'fstack> Tokenizer<'fstack, '_, '_, '_, '_> {
 }
 
 mod char_stream;
+mod tokens;
+// These are the various "modes" the function below dispatches to.
 mod mode_capture_body;
 mod mode_normal;
 mod mode_raw;
-mod tokens;
 
 /// The interface used by the parser.
-impl<'fstack> Iterator for Tokenizer<'fstack, '_, '_, '_, '_> {
+impl<'fstack> Iterator for Tokenizer<'_, 'fstack, '_, '_, '_, '_> {
     type Item = Result<(Location<'fstack>, Token, Location<'fstack>), AsmError<'fstack>>;
 
     fn next(&mut self) -> Option<Self::Item> {

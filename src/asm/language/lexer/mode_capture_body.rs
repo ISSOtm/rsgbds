@@ -1,6 +1,6 @@
 use super::*;
 
-impl Tokenizer<'_, '_, '_, '_, '_> {
+impl Tokenizer<'_, '_, '_, '_, '_, '_> {
     // TODO: it'd be nicer to determine `end_len` automatically...
     pub(super) fn next_capture_body(
         &mut self,

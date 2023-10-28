@@ -1,6 +1,6 @@
 use super::*;
 
-impl Tokenizer<'_, '_, '_, '_, '_> {
+impl Tokenizer<'_, '_, '_, '_, '_, '_> {
     pub(super) fn next_raw(&mut self) -> Option<(Result<Token, AsmErrorKind>, usize)> {
         // First, skip any whitespace.
         loop {

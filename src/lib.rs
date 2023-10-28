@@ -1,3 +1,7 @@
+use std::num::IntErrorKind;
+
+use parse_display::Display;
+
 pub mod rpn;
 pub mod section;
 
@@ -56,9 +60,53 @@ impl RelocKind {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum TruncationLevel {
     None,
     Loose,
     Strict,
+}
+
+// ---
+
+#[derive(Debug, Clone, Display)]
+pub enum ParseNumError<T> {
+    #[display("cannot parse an integer from an empty string")]
+    Empty,
+    #[display("an invalid digit was found")]
+    InvalidDigit,
+    #[display("the number cannot be lower than {0}")]
+    TooSmall(T),
+    #[display("the number cannot be higher than {0}")]
+    TooLarge(T),
+}
+
+pub fn parse_generic_u16(string: &str, min: u16, max: u16) -> Result<u16, ParseNumError<u16>> {
+    let mut chars = string.chars();
+    let parse_res =
+        if chars.next() == Some('$') && chars.next().is_some_and(|c| c.is_ascii_hexdigit()) {
+            u16::from_str_radix(&string[1..], 16)
+        } else {
+            string.parse()
+        };
+
+    match parse_res {
+        Ok(num) => {
+            if num < min {
+                Err(ParseNumError::TooSmall(min))
+            } else if num > max {
+                Err(ParseNumError::TooLarge(max))
+            } else {
+                Ok(num)
+            }
+        }
+
+        Err(err) => Err(match err.kind() {
+            IntErrorKind::Empty => ParseNumError::Empty,
+            IntErrorKind::InvalidDigit => ParseNumError::InvalidDigit,
+            IntErrorKind::PosOverflow => ParseNumError::TooSmall(min),
+            IntErrorKind::NegOverflow => ParseNumError::TooLarge(max),
+            _ => panic!("Unknown parse error!?"),
+        }),
+    }
 }

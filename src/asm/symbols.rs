@@ -301,7 +301,7 @@ impl SymbolData<'_> {
             SymbolKind::Label { section, offset } => todo!(),
             SymbolKind::Pc => match sections
                 .active_section()
-                .ok_or_else(|| SymEvalErrKind::PcOutsideSection)?
+                .ok_or(SymEvalErrKind::PcOutsideSection)?
                 .try_get_pc()
             {
                 Some(pc) => Ok(pc.into()),

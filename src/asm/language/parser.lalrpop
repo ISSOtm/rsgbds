@@ -12,6 +12,7 @@ use crate::{
     instructions::*,
     language::WarningKind,
     macro_args::MacroArgs,
+    opt::RuntimeOptStack,
     sections::{SectConstraints, SectionAttributes, Sections},
     symbols::Symbols,
 };
@@ -19,6 +20,7 @@ use crate::{
 use super::{AsmError, AsmErrorKind, lexer::Mode as LexerMode, Lexer, Location, ObsoleteKind, Token, Warning};
 
 grammar<'fstack>(
+    runtime_opts: &RefCell<RuntimeOptStack>,
     fstack: &'fstack Fstack,
     lexer: &RefCell<Lexer>,
     macro_args: &RefCell<Vec<MacroArgs>>,
@@ -124,7 +126,16 @@ SimpleLine: () = {
             let instr = instr?;
             let mut section = sections.active_section_mut().ok_or(AsmErrorKind::InstrOutsideSection)?;
             Ok(match Encoder::new(instr) {
-                Ok(encoder) => Ok(section.extend(encoder, |warning| reporter.borrow_mut().warn(fstack, warning))?),
+                Ok(encoder) => {
+                    Ok(section.extend(
+                        encoder,
+                        |warning| reporter.borrow_mut().warn(
+                            fstack,
+                            warning,
+                            &runtime_opts.borrow().cur_options().warn_settings,
+                        )
+                    )?)
+                }
                 Err(err) => Err(err)
             })
         };
@@ -157,12 +168,13 @@ MacroInvocation: () = {
     // The argument list is only a list of strings, not comma-separated; see `Tokenizer::next_raw()`
     // for more information.
     <begin:@L> <name:MacroName> <end:@R> lookahead_hack <args:MacroArg*> => {
-        let args = MacroArgs::new(args);
-        macro_args.borrow_mut().push(args);
-
         match symbols.borrow_mut().get_macro(&name) {
             Err(kind) => reporter.borrow_mut().report_error(fstack, AsmError::new(begin, end, kind).into()),
+
             Ok((_, body)) => {
+                let args = MacroArgs::new(args);
+                macro_args.borrow_mut().push(args);
+
                 let mut lexer = lexer.borrow_mut();
                 fstack.push_macro(Rc::clone(body), &mut lexer);
             }
@@ -177,7 +189,11 @@ MacroName: String = <identifier> => {
 MacroArg: Rc<String> = {
     <begin:@L> <string:string> <end:@R> => {
         if string.is_empty() {
-            reporter.borrow_mut().warn(fstack, Warning { begin, end, kind: WarningKind::EmptyMacroArg });
+            reporter.borrow_mut().warn(
+                fstack,
+                Warning { begin, end, kind: WarningKind::EmptyMacroArg },
+                &runtime_opts.borrow().cur_options().warn_settings,
+            );
         }
         Rc::new(string)
     },
@@ -188,7 +204,11 @@ Directive: () = {
     // "Meta" directives.
     PrintDirective,
     <begin:@L> "warn" <msg:StringExpr> <end:@R> => {
-        reporter.borrow_mut().warn(fstack, Warning { begin, end, kind: WarningKind::User(msg) })
+        reporter.borrow_mut().warn(
+            fstack,
+            Warning { begin, end, kind: WarningKind::User(msg) },
+            &runtime_opts.borrow().cur_options().warn_settings,
+        )
     },
     "fail" <msg:StringExpr> => todo!(),
     "shift" <amount:NumExpr<Term>?> => todo!(),
@@ -245,9 +265,34 @@ Directive: () = {
     "popc" => todo!(),
 
     // Option management.
-    "opt",
-    "pusho" => todo!(),
-    "popo" => todo!(),
+    <opt_begin:@L> "opt" <opt_end:@R> <opt_strings:CommaList<(@L string @R)>> => { // Note that encountering `opt` automatically switches to "raw mode".
+        let res = if opt_strings.is_empty() {
+            Err(AsmError::new(opt_begin, opt_end, AsmErrorKind::EmptyOpt))
+        } else {
+            (|| {
+                let mut opts = runtime_opts.borrow_mut();
+                let cur_opts = opts.cur_options_mut();
+
+                for (begin, string, end) in opt_strings {
+                    match string.chars().next() {
+                        Some(c) => cur_opts.parse_option(c, &string[c.len_utf8()..]),
+                        None => todo!(),
+                    }.map_err(|kind| AsmError::new(begin, end, kind))?
+                }
+                Ok(())
+            })()
+        };
+
+        if let Err(err) = res {
+            reporter.borrow_mut().report_error(fstack, err.into());
+        }
+    },
+    "pusho" => runtime_opts.borrow_mut().push(),
+    <begin:@L> "popo" <end:@R> => {
+        if let Err(err) = runtime_opts.borrow_mut().pop() {
+            reporter.borrow_mut().report_error(fstack, AsmError::new(begin, end, err).into());
+        }
+    },
 }
 
 PrintDirective: () = {
@@ -424,7 +469,11 @@ Instruction: Result<Instruction<'fstack>, BadInstructionKind> = {
     <begin:@L> <is_ld:LdOrLdh> "[" <dest:Reg8> "]" "," <src:Reg8> <end:@R> => {
         Instruction::ldh_c_a(dest, src).map(|instr| {
             if is_ld {
-                reporter.borrow_mut().warn(fstack, Warning { begin, end, kind: ObsoleteKind::LdCA.into() });
+                reporter.borrow_mut().warn(
+                    fstack,
+                    Warning { begin, end, kind: ObsoleteKind::LdCA.into() },
+                    &runtime_opts.borrow().cur_options().warn_settings,
+                );
             }
             instr
         })
@@ -437,7 +486,11 @@ Instruction: Result<Instruction<'fstack>, BadInstructionKind> = {
     <begin:@L> <is_ld:LdOrLdh> <dest:Reg8> "," "[" <src:Reg8> "]" <end:@R> => {
         Instruction::ldh_a_c(dest, src).map(|instr| {
             if is_ld {
-                reporter.borrow_mut().warn(fstack, Warning { begin, end, kind: ObsoleteKind::LdAC.into() });
+                reporter.borrow_mut().warn(
+                    fstack,
+                    Warning { begin, end, kind: ObsoleteKind::LdAC.into() },
+                    &runtime_opts.borrow().cur_options().warn_settings,
+                );
             }
             instr
         })
@@ -749,6 +802,14 @@ AnyIdent: String = {
 
 CommaList<T>: Vec<T> = {
     (<T> ",")*,
+    <mut v:(<T> ",")*> <last:T> => {
+        v.push(last);
+        v
+    }
+}
+
+CommaList1<T>: Vec<T> = {
+    (<T> ",")+,
     <mut v:(<T> ",")*> <last:T> => {
         v.push(last);
         v

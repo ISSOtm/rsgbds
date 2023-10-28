@@ -1,7 +1,7 @@
 use std::{
     cell::{Cell, RefCell},
     num::NonZeroUsize,
-    ops::{Deref, Range},
+    ops::Range,
     rc::Rc,
 };
 

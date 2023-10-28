@@ -1,7 +1,7 @@
 //! The "character stream" functions.
 use super::*;
 
-impl<'fstack> Tokenizer<'fstack, '_, '_, '_, '_> {
+impl<'fstack> Tokenizer<'_, 'fstack, '_, '_, '_, '_> {
     // Retrieves the "source" string underlying the provided state; if an expansion is active, its
     // contents are returned, otherwise the state's "root" node is used.
     // Note that the returned `&str` has already been offset, the `&mut usize` should only be

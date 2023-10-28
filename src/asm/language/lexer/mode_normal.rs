@@ -1,6 +1,6 @@
 use super::*;
 
-impl Tokenizer<'_, '_, '_, '_, '_> {
+impl Tokenizer<'_, '_, '_, '_, '_, '_> {
     pub(super) fn next_normal(&mut self) -> Option<(Result<Token, AsmErrorKind>, usize)> {
         macro_rules! try_chars {
             ($default:expr $(, $ch:pat => $result:expr)+ $(,)?) => {
@@ -179,7 +179,15 @@ impl Tokenizer<'_, '_, '_, '_, '_> {
                                 self.bump();
                                 Token::ModEq
                             }
-                            Some(ch) if self.lexer.borrow().bin_digits.iter().any(|c| *c == ch) => {
+                            Some(ch)
+                                if self
+                                    .runtime_opts
+                                    .borrow()
+                                    .cur_options()
+                                    .binary_digits
+                                    .iter()
+                                    .any(|c| *c == ch) =>
+                            {
                                 self.bump();
                                 Token::Number(self.read_bin_number(ch))
                             }
@@ -293,6 +301,11 @@ impl Tokenizer<'_, '_, '_, '_, '_> {
                                 // This gets set back to `true` after reading the identifier,
                                 // or after recovering from a syntax error.
                                 self.lexer.borrow_mut().expand_equs = false;
+                                token
+                            }
+                            Token::Opt => {
+                                // `opt` has unique parsing, so it needs to switch into raw mode immediately.
+                                self.lexer.borrow_mut().mode = Mode::Raw;
                                 token
                             }
                             tok => tok,

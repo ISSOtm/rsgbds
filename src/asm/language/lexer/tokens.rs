@@ -1,7 +1,7 @@
 use super::*;
 
 /// Lexing sub-functions.
-impl Tokenizer<'_, '_, '_, '_, '_> {
+impl Tokenizer<'_, '_, '_, '_, '_, '_> {
     pub(super) fn handle_crlf(&mut self, ch: char) {
         if ch == '\r' && self.peek() == Some('\n') {
             self.bump();
@@ -61,6 +61,7 @@ impl Tokenizer<'_, '_, '_, '_, '_> {
                         end,
                         kind: crate::language::WarningKind::NestedBlockComment,
                     },
+                    &self.runtime_opts.borrow().cur_options().warn_settings,
                 );
             } else if ch == '*' && self.peek() == Some('/') {
                 self.bump();
@@ -105,11 +106,13 @@ impl Tokenizer<'_, '_, '_, '_, '_> {
     }
 
     pub(super) fn read_bin_number(&mut self, first_char: char) -> u32 {
-        let lexer = self.lexer.borrow();
+        let opt_stack = self.runtime_opts.borrow();
+        let opts = opt_stack.cur_options();
+
         let digit = |ch| {
-            if ch == lexer.bin_digits[0] {
+            if ch == opts.binary_digits[0] {
                 Some(0)
-            } else if ch == lexer.bin_digits[1] {
+            } else if ch == opts.binary_digits[1] {
                 Some(1)
             } else {
                 None
@@ -132,12 +135,14 @@ impl Tokenizer<'_, '_, '_, '_, '_> {
     }
 
     pub(super) fn read_gfx_constant(&mut self) -> Result<u32, AsmErrorKind> {
-        let lexer = self.lexer.borrow();
+        let opt_stack = self.runtime_opts.borrow();
+        let opts = opt_stack.cur_options();
+
         let digit = |ch| match ch {
-            ch if ch == lexer.gfx_digits[0] => Some(0),
-            ch if ch == lexer.gfx_digits[1] => Some(1),
-            ch if ch == lexer.gfx_digits[2] => Some(2),
-            ch if ch == lexer.gfx_digits[3] => Some(3),
+            ch if ch == opts.gfx_digits[0] => Some(0),
+            ch if ch == opts.gfx_digits[1] => Some(1),
+            ch if ch == opts.gfx_digits[2] => Some(2),
+            ch if ch == opts.gfx_digits[3] => Some(3),
             _ => None,
         };
 
@@ -165,7 +170,7 @@ impl Tokenizer<'_, '_, '_, '_, '_> {
         }
 
         if width == 0 {
-            return Err(AsmErrorKind::NoGfxChars(lexer.gfx_digits));
+            return Err(AsmErrorKind::NoGfxChars(opts.gfx_digits));
         }
         if width > 8 {
             // TODO: warning
