@@ -6,14 +6,14 @@ use std::{
 use rgbds::RelocKind;
 
 use super::{Instruction, PrefixKind};
-use crate::{expr::ByteOrExpr, language::ParseError};
+use crate::{expr::ByteOrExpr, language::AsmError};
 
 #[derive(Debug)]
 pub struct Encoder<'fstack>(EncoderStorage<ByteOrExpr<'fstack>>, usize);
 type EncoderStorage<T> = [MaybeUninit<T>; 2];
 
 impl<'fstack> Encoder<'fstack> {
-    pub fn new(instr: Instruction<'fstack>) -> Result<Self, ParseError<'fstack>> {
+    pub fn new(instr: Instruction<'fstack>) -> Result<Self, AsmError<'fstack>> {
         let mut storage: EncoderStorage<_> = unsafe { MaybeUninit::uninit().assume_init() };
 
         // Let's try to make the monster below a bit more digestible.

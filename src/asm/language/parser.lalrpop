@@ -122,26 +122,22 @@ SimpleLine: () = {
     LabelDef? MacroInvocation,
     LabelDef? <begin:@L> <instr:Instruction> <end:@R> => {
         let mut sections = sections.borrow_mut();
-        let emit = || {
-            let instr = instr?;
-            let mut section = sections.active_section_mut().ok_or(AsmErrorKind::InstrOutsideSection)?;
-            Ok(match Encoder::new(instr) {
-                Ok(encoder) => {
-                    Ok(section.extend(
-                        encoder,
-                        |warning| reporter.borrow_mut().warn(
-                            fstack,
-                            warning,
-                            &runtime_opts.borrow().cur_options().warn_settings,
-                        )
-                    )?)
-                }
-                Err(err) => Err(err)
-            })
-        };
-        if let Err(err) = emit().unwrap_or_else(|kind| Err(AsmError::new(begin, end, kind).into())) {
-            reporter.borrow_mut().report_error(fstack, err);
+        match instr {
+            Err(error) => Ok(Err(error.into())),
+            Ok(instr) => Encoder::new(instr).map(|encoder| {
+                let mut section = sections.active_section_mut().ok_or(AsmErrorKind::InstrOutsideSection)?;
+                section.extend(
+                    encoder,
+                    |warning| reporter.borrow_mut().warn(
+                        fstack,
+                        warning,
+                        &runtime_opts.borrow().cur_options().warn_settings,
+                    )
+                )
+            }),
         }
+            .and_then(|res| res.map_err(|kind| AsmError::new(begin, end, kind)))
+            .unwrap_or_else(|error| reporter.borrow_mut().report_error(fstack, error.into()))
     },
     LabelDef? Directive,
     "endc" => todo!(), // This can only be preceded by whitespace on its line.
@@ -222,20 +218,13 @@ Directive: () = {
     // TODO: mutable definitions (`=`, etc.)
     <name:DefIdent> "equ" <expr:NumExpr<Term>> => {
         let res = expr.try_eval(&symbols.borrow(), macro_args.borrow().last(), &sections.borrow());
-        match res {
-            Err(err) => reporter.borrow_mut().report_error(fstack, err.into()),
-            Ok((value, _, _)) => {
-                if let Err(err) = symbols.borrow_mut()
-                                         .def_constant(name.0, name.1, name.2, value, false) {
-                    reporter.borrow_mut().report_error(fstack, err.into());
-                }
-            }
-        }
+        res.and_then(|(value, _, _)| symbols.borrow_mut().def_constant(name.0, name.1, name.2, value, false))
+            .unwrap_or_else(|error| reporter.borrow_mut().report_error(fstack, error.into()));
     },
     <name:DefIdent> "equs" <string:StringExpr> => {
         symbols.borrow_mut()
-               .def_string(name.0, name.1, name.2, Rc::new(string))
-               .unwrap_or_else(|error| reporter.borrow_mut().report_error(fstack, error.into()))
+            .def_string(name.0, name.1, name.2, Rc::new(string))
+            .unwrap_or_else(|error| reporter.borrow_mut().report_error(fstack, error.into()))
     },
     "rsreset" => {
         let mut symbols = symbols.borrow_mut();
@@ -244,30 +233,22 @@ Directive: () = {
     },
     "rsset" <expr:NumExpr<Term>> => {
         let res = expr.try_eval(&symbols.borrow(), macro_args.borrow().last(), &sections.borrow());
-        match res {
-            Err(err) => reporter.borrow_mut().report_error(fstack, err.into()),
-            Ok((value, _, _)) => {
-                let mut symbols = symbols.borrow_mut();
-                let rs = symbols.get_rs();
-                *rs += value;
-            }
-        }
+        res.map(|(value, _, _)| {
+            let mut symbols = symbols.borrow_mut();
+            let rs = symbols.get_rs();
+            *rs += value;
+        }).unwrap_or_else(|error| reporter.borrow_mut().report_error(fstack, error.into()));
     },
     // RB, RW, RL.
     <name:DefIdent> <width:RsDefKind> <expr:NumExpr<Term>> => {
         let res = expr.try_eval(&symbols.borrow(), macro_args.borrow().last(), &sections.borrow());
-        match res {
-            Err(err) => reporter.borrow_mut().report_error(fstack, err.into()),
-            Ok((value, _, _)) => {
-                let mut symbols = symbols.borrow_mut();
-                let rs = symbols.get_rs();
-                let old_rs_value = *rs;
-                *rs += value * width;
-                if let Err(err) = symbols.def_constant(name.0, name.1, name.2, old_rs_value, false) {
-                    reporter.borrow_mut().report_error(fstack, err.into());
-                }
-            }
-        }
+        res.and_then(|(value, _, _)| {
+            let mut symbols = symbols.borrow_mut();
+            let rs = symbols.get_rs();
+            let old_rs_value = *rs;
+            *rs += value * width;
+            symbols.def_constant(name.0, name.1, name.2, old_rs_value, false)
+        }).unwrap_or_else(|error| reporter.borrow_mut().report_error(fstack, error.into()));
     },
 
     // Symbol manipulation.
@@ -367,11 +348,11 @@ SectionDef: () = {
     <begin:@L> "section" <modifier:SectModifier> <name:StringExpr> "," <kind:SectKind> <addr:SectAddress?> <attrs:SectAttributes> <end:@R> => {
         let mut sections = sections.borrow_mut();
 
-        if let Err(err) = SectConstraints::try_new(
+        SectConstraints::try_new(
             kind, addr, attrs, begin, end, &symbols.borrow(), macro_args.borrow().last(), &mut sections,
-        ).and_then(|(attrs, begin, end)| sections.add_section(name, kind, modifier, attrs, begin, end,)) {
-            reporter.borrow_mut().report_error(fstack, err.into());
-        }
+        )
+            .and_then(|(attrs, begin, end)| sections.add_section(name, kind, modifier, attrs, begin, end,))
+            .unwrap_or_else(|err| reporter.borrow_mut().report_error(fstack, err.into()))
     }
 }
 

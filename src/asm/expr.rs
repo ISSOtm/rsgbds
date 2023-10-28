@@ -4,7 +4,7 @@ use rgbds::{
 };
 
 use crate::{
-    language::{AsmError, Location, ParseError, SymEvalErrKind},
+    language::{AsmError, Location, SymEvalErrKind},
     macro_args::MacroArgs,
     sections::Sections,
     symbols::{SymbolId, Symbols},
@@ -129,10 +129,10 @@ impl<'fstack> Expression<'fstack> {
 
     pub fn into_raw_parts(
         self,
-    ) -> Result<(Location<'fstack>, Location<'fstack>, Rpn), ParseError<'fstack>> {
+    ) -> Result<(Location<'fstack>, Location<'fstack>, Rpn), AsmError<'fstack>> {
         match self.rpn {
             Ok(rpn) => Ok((self.begin, self.end, rpn)),
-            Err(err) => Err(AsmError::new(self.begin, self.end, err.into()).into()),
+            Err(err) => Err(AsmError::new(self.begin, self.end, err.into())),
         }
     }
 }
@@ -147,7 +147,7 @@ impl<'fstack> ByteOrExpr<'fstack> {
     pub fn try_from_expr(
         expr: Expression<'fstack>,
         kind: RelocKind,
-    ) -> Result<Self, ParseError<'fstack>> {
+    ) -> Result<Self, AsmError<'fstack>> {
         let (begin, end, rpn) = expr.into_raw_parts()?;
         Ok(Self::Expr(begin, end, rpn, kind))
     }
