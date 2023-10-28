@@ -175,12 +175,12 @@ impl<'fstack> Symbols<'fstack> {
 
     pub fn get_number(
         &self,
-        name_str: &String,
+        name_str: &str,
         macro_args: Option<&MacroArgs>,
         sections: &Sections,
     ) -> Result<i32, SymEvalErrKind> {
         self.get_sym(name_str)
-            .ok_or_else(|| SymEvalErrKind::NoSuchSymbol(String::clone(name_str)))?
+            .ok_or_else(|| SymEvalErrKind::NoSuchSymbol(name_str.into()))?
             .get_number(name_str, macro_args, sections)
     }
 
@@ -194,11 +194,10 @@ impl<'fstack> Symbols<'fstack> {
         let name_str = self
             .names
             .resolve(name)
-            .expect("Generated invalid sym ID in RPN!?")
-            .into();
+            .expect("Generated invalid sym ID in RPN!?");
         match self.symbols.get(&name) {
             Some(sym_data) => sym_data.get_number(&name_str, macro_args, sections),
-            None => Err(SymEvalErrKind::NoSuchSymbol(name_str)),
+            None => Err(SymEvalErrKind::NoSuchSymbol(name_str.into())),
         }
     }
 
@@ -213,23 +212,23 @@ impl<'fstack> Symbols<'fstack> {
             .expect("Built-in symbol _RS somehow got undefined?!?")
     }
 
-    pub fn get_string(&self, name_str: &String) -> Result<&Rc<String>, AsmErrorKind> {
+    pub fn get_string(&self, name_str: &str) -> Result<&Rc<String>, AsmErrorKind> {
         self.get_sym(name_str)
-            .ok_or_else(|| AsmErrorKind::NoSuchSymbol(name_str.clone()))?
+            .ok_or_else(|| AsmErrorKind::NoSuchSymbol(name_str.into()))?
             .get_string()
-            .ok_or_else(|| AsmErrorKind::SymNotEqus(name_str.clone()))
+            .ok_or_else(|| AsmErrorKind::SymNotEqus(name_str.into()))
     }
 
-    pub fn get_macro(&self, name_str: &String) -> Result<(SymbolU32, &Rc<String>), AsmErrorKind> {
+    pub fn get_macro(&self, name_str: &str) -> Result<(SymbolU32, &Rc<String>), AsmErrorKind> {
         let (name, data) = self
             .names
             .get(name_str)
             .and_then(|name| self.symbols.get(&name).map(|data| (name, data)))
-            .ok_or_else(|| AsmErrorKind::NoSuchSymbol(name_str.clone()))?;
+            .ok_or_else(|| AsmErrorKind::NoSuchSymbol(name_str.into()))?;
         Ok((
             name,
             data.get_macro()
-                .ok_or_else(|| AsmErrorKind::SymNotMacro(name_str.clone()))?,
+                .ok_or_else(|| AsmErrorKind::SymNotMacro(name_str.into()))?,
         ))
     }
 
@@ -257,7 +256,7 @@ impl<'fstack> Symbols<'fstack> {
     /// On success, returns a unique identifier for that symbol.
     pub fn add_num_ref(
         &mut self,
-        name_str: &String,
+        name_str: &str,
         begin: &Location<'fstack>,
         end: &Location<'fstack>,
     ) -> Result<SymbolId, SymEvalErrKind> {
@@ -276,7 +275,7 @@ impl<'fstack> Symbols<'fstack> {
             Entry::Occupied(mut entry) => {
                 let symbol = entry.get_mut();
                 if !symbol.kind.is_numeric() {
-                    return Err(SymEvalErrKind::NotNumeric(String::clone(name_str)));
+                    return Err(SymEvalErrKind::NotNumeric(name_str.into()));
                 }
                 symbol.is_referenced = true;
             }
@@ -314,7 +313,7 @@ pub enum SymbolKind {
 impl SymbolData<'_> {
     fn get_number(
         &self,
-        name: &String,
+        name: &str,
         macro_args: Option<&MacroArgs>,
         sections: &Sections<'_>,
     ) -> Result<i32, SymEvalErrKind> {
@@ -327,15 +326,15 @@ impl SymbolData<'_> {
                 .try_get_pc()
             {
                 Some(pc) => Ok(pc.into()),
-                None => Err(SymEvalErrKind::NonConst(String::clone(name))),
+                None => Err(SymEvalErrKind::NonConst(name.into())),
             },
             SymbolKind::Narg => match macro_args {
                 Some(args) => Ok(args.nb_args().try_into().expect("Macro has too many args!")),
                 None => Err(SymEvalErrKind::NargOutsideMacro),
             },
-            SymbolKind::NumRef => Err(SymEvalErrKind::NonConst(String::clone(name))),
+            SymbolKind::NumRef => Err(SymEvalErrKind::NonConst(name.into())),
             SymbolKind::String(_) | SymbolKind::Macro(_) => {
-                Err(SymEvalErrKind::NotNumeric(String::clone(name)))
+                Err(SymEvalErrKind::NotNumeric(name.into()))
             }
         }
     }

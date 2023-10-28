@@ -265,7 +265,7 @@ impl Binder<'_> {
 
 impl<'fstack> Files<'fstack> for Binder<'fstack> {
     type FileId = usize;
-    type Name = &'fstack String;
+    type Name = &'fstack str;
     type Source = &'fstack str;
 
     fn name(
