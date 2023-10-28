@@ -15,6 +15,9 @@ pub struct Symbols<'fstack> {
     symbols: HashMap<SymbolU32, SymbolData<'fstack>>,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct SymbolId(pub u32);
+
 impl<'fstack> Symbols<'fstack> {
     pub fn new() -> Self {
         const BUILTINS: &[(&str, SymbolKind)] = &[
@@ -173,11 +176,11 @@ impl<'fstack> Symbols<'fstack> {
 
     pub fn get_number_from_id(
         &self,
-        id: u32,
+        id: SymbolId,
         macro_args: Option<&MacroArgs>,
         sections: &Sections,
     ) -> Result<i32, SymEvalErrKind> {
-        let name = SymbolU32::try_from_usize(id as usize).unwrap();
+        let name = SymbolU32::try_from_usize(id.0.try_into().unwrap()).unwrap();
         let name_str = self
             .names
             .resolve(name)
@@ -238,7 +241,7 @@ impl<'fstack> Symbols<'fstack> {
         name_str: &String,
         begin: &Location<'fstack>,
         end: &Location<'fstack>,
-    ) -> Result<u32, SymEvalErrKind> {
+    ) -> Result<SymbolId, SymEvalErrKind> {
         use std::collections::hash_map::Entry;
 
         let name = self.names.get_or_intern(name_str);
@@ -254,12 +257,12 @@ impl<'fstack> Symbols<'fstack> {
             Entry::Occupied(mut entry) => {
                 let symbol = entry.get_mut();
                 if !symbol.kind.is_numeric() {
-                    return Err(SymEvalErrKind::NotNumeric(String::clone(name_str)).into());
+                    return Err(SymEvalErrKind::NotNumeric(String::clone(name_str)));
                 }
                 symbol.is_referenced = true;
             }
         }
-        Ok(name.to_usize() as u32) // This cast can't truncate, because the symbol is internally 32-bit.
+        Ok(SymbolId(name.to_usize() as u32)) // This cast can't truncate, because the symbol is internally 32-bit.
     }
 }
 

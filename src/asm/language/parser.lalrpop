@@ -152,7 +152,7 @@ LabelDef: () = {
     ":" => todo!(), // Anonymous label
     <name:label> <exported:LabelDefKind> => {
         let mut sections = sections.borrow_mut();
-        //
+        todo!();
     },
     <name:local_ident> <exported:LabelDefKind> => {
         todo!();
@@ -214,12 +214,13 @@ Directive: () = {
         reporter.borrow_mut().report_fatal_error(fstack, AsmError::new(begin, end, AsmErrorKind::Fail(msg)).into());
     },
     "shift" <amount:NumExpr<Term>?> => todo!(),
-    "assert",
-    "static_assert",
+    "assert" => todo!(),
+    "static_assert" => todo!(),
 
     // Symbol definitions.
     <name:DefIdent> "equ" <expr:NumExpr<Term>> => {
-        match expr.try_eval(&symbols.borrow(), macro_args.borrow().last(), &sections.borrow()) {
+        let res = expr.try_eval(&symbols.borrow(), macro_args.borrow().last(), &sections.borrow());
+        match res {
             Err(err) => reporter.borrow_mut().report_error(fstack, err.into()),
             Ok((value, _, _)) => {
                 if let Err(err) = symbols.borrow_mut()

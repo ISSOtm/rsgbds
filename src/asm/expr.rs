@@ -7,7 +7,7 @@ use crate::{
     language::{AsmError, Location, ParseError, SymEvalErrKind},
     macro_args::MacroArgs,
     sections::Sections,
-    symbols::Symbols,
+    symbols::{SymbolId, Symbols},
 };
 
 /// Importantly, the two locations `begin` and `end` do not necessarily represent the full expression, but e.g. the location of the sub-expression that generated the current error.
@@ -30,13 +30,13 @@ impl<'fstack> Expression<'fstack> {
     pub fn symbol(
         begin: Location<'fstack>,
         end: Location<'fstack>,
-        sym_id: Result<u32, SymEvalErrKind>,
+        sym_id: Result<SymbolId, SymEvalErrKind>,
     ) -> Self {
         Self {
             begin,
             end,
             rpn: match sym_id {
-                Ok(id) => Ok(Rpn::symbol(id)),
+                Ok(id) => Ok(Rpn::symbol(id.0)),
                 Err(err) => Err(err.into()),
             },
         }
@@ -119,7 +119,7 @@ impl<'fstack> Expression<'fstack> {
         macro_args: Option<&MacroArgs>,
         sections: &Sections,
     ) -> Result<(i32, Location<'fstack>, Location<'fstack>), AsmError<'fstack>> {
-        let get_sym_value = |id| symbols.get_number_from_id(id, macro_args, sections);
+        let get_sym_value = |id| symbols.get_number_from_id(SymbolId(id), macro_args, sections);
 
         match self.rpn.and_then(|rpn| rpn.try_eval(get_sym_value)) {
             Ok(value) => Ok((value, self.begin, self.end)),
