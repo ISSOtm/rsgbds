@@ -218,6 +218,8 @@ Directive: () = {
     "static_assert" => todo!(),
 
     // Symbol definitions.
+    // TODO: `redef`
+    // TODO: mutable definitions (`=`, etc.)
     <name:DefIdent> "equ" <expr:NumExpr<Term>> => {
         let res = expr.try_eval(&symbols.borrow(), macro_args.borrow().last(), &sections.borrow());
         match res {
@@ -235,8 +237,38 @@ Directive: () = {
                .def_string(name.0, name.1, name.2, Rc::new(string))
                .unwrap_or_else(|error| reporter.borrow_mut().report_error(fstack, error.into()))
     },
-    "rsreset" => todo!(),
-    "rsset" <expr:NumExpr<Term>> => todo!(),
+    "rsreset" => {
+        let mut symbols = symbols.borrow_mut();
+        let rs = symbols.get_rs();
+        *rs = 0;
+    },
+    "rsset" <expr:NumExpr<Term>> => {
+        let res = expr.try_eval(&symbols.borrow(), macro_args.borrow().last(), &sections.borrow());
+        match res {
+            Err(err) => reporter.borrow_mut().report_error(fstack, err.into()),
+            Ok((value, _, _)) => {
+                let mut symbols = symbols.borrow_mut();
+                let rs = symbols.get_rs();
+                *rs += value;
+            }
+        }
+    },
+    // RB, RW, RL.
+    <name:DefIdent> <width:RsDefKind> <expr:NumExpr<Term>> => {
+        let res = expr.try_eval(&symbols.borrow(), macro_args.borrow().last(), &sections.borrow());
+        match res {
+            Err(err) => reporter.borrow_mut().report_error(fstack, err.into()),
+            Ok((value, _, _)) => {
+                let mut symbols = symbols.borrow_mut();
+                let rs = symbols.get_rs();
+                let old_rs_value = *rs;
+                *rs += value * width;
+                if let Err(err) = symbols.def_constant(name.0, name.1, name.2, old_rs_value, false) {
+                    reporter.borrow_mut().report_error(fstack, err.into());
+                }
+            }
+        }
+    },
 
     // Symbol manipulation.
     "export",
@@ -297,6 +329,8 @@ Directive: () = {
         }
     },
 }
+
+RsDefKind: i32 = { "rb" => 1, "rw" => 2, "rl" => 4 }
 
 PrintDirective: () = {
     "print" CommaList<PrintExpr>,

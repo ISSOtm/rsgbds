@@ -167,6 +167,8 @@ pub enum SymEvalErrKind {
     NonConst(String), // TODO: say where it was defined?
     #[display("\"{0}\" is not a numeric symbol")]
     NotNumeric(String),
+    #[display("\"{0}\"'s value cannot be modified")]
+    NotMutable(String),
     #[display("\"_NARG\" is only defined inside of macros")]
     NargOutsideMacro,
     #[display("\"@\" is only defined within a section")]

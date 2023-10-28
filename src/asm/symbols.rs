@@ -161,15 +161,25 @@ impl<'fstack> Symbols<'fstack> {
         )
     }
 
+    fn get_sym(&self, name_str: &str) -> Option<&SymbolData<'fstack>> {
+        self.names
+            .get(name_str)
+            .and_then(|name| self.symbols.get(&name))
+    }
+
+    fn get_sym_mut(&mut self, name_str: &str) -> Option<&mut SymbolData<'fstack>> {
+        self.names
+            .get(name_str)
+            .and_then(|name| self.symbols.get_mut(&name))
+    }
+
     pub fn get_number(
         &self,
         name_str: &String,
         macro_args: Option<&MacroArgs>,
         sections: &Sections,
     ) -> Result<i32, SymEvalErrKind> {
-        self.names
-            .get(name_str)
-            .and_then(|name| self.symbols.get(&name))
+        self.get_sym(name_str)
             .ok_or_else(|| SymEvalErrKind::NoSuchSymbol(String::clone(name_str)))?
             .get_number(name_str, macro_args, sections)
     }
@@ -192,10 +202,19 @@ impl<'fstack> Symbols<'fstack> {
         }
     }
 
+    pub fn get_mut_number(&mut self, name_str: &str) -> Result<&mut i32, SymEvalErrKind> {
+        self.get_sym_mut(name_str)
+            .ok_or_else(|| SymEvalErrKind::NoSuchSymbol(name_str.into()))?
+            .get_mut_number(name_str)
+    }
+
+    pub fn get_rs(&mut self) -> &mut i32 {
+        self.get_mut_number("_RS")
+            .expect("Built-in symbol _RS somehow got undefined?!?")
+    }
+
     pub fn get_string(&self, name_str: &String) -> Result<&Rc<String>, AsmErrorKind> {
-        self.names
-            .get(name_str)
-            .and_then(|name| self.symbols.get(&name))
+        self.get_sym(name_str)
             .ok_or_else(|| AsmErrorKind::NoSuchSymbol(name_str.clone()))?
             .get_string()
             .ok_or_else(|| AsmErrorKind::SymNotEqus(name_str.clone()))
@@ -317,6 +336,18 @@ impl SymbolData<'_> {
             SymbolKind::NumRef => Err(SymEvalErrKind::NonConst(String::clone(name))),
             SymbolKind::String(_) | SymbolKind::Macro(_) => {
                 Err(SymEvalErrKind::NotNumeric(String::clone(name)))
+            }
+        }
+    }
+
+    fn get_mut_number(&mut self, name: &str) -> Result<&mut i32, SymEvalErrKind> {
+        match &mut self.kind {
+            SymbolKind::Constant(value) | SymbolKind::Variable(value) => Ok(value),
+            SymbolKind::String(_) | SymbolKind::Macro(_) => {
+                Err(SymEvalErrKind::NotNumeric(name.into()))
+            }
+            SymbolKind::Label { .. } | SymbolKind::NumRef | SymbolKind::Pc | SymbolKind::Narg => {
+                Err(SymEvalErrKind::NotMutable(name.into()))
             }
         }
     }
