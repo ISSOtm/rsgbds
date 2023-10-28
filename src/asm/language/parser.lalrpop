@@ -349,14 +349,16 @@ PrintExpr: () = {
 
 // Symbol destruction.
 Purge: () = {
-    "purge" CommaList<PurgeSymName>,
+    "purge" <CommaList<PurgeSymName>> => {
+        for (begin, name, end) in <> {
+            match symbols.borrow_mut().purge(&name) {
+                Ok(()) => (),
+                Err(kind) => reporter.borrow_mut().report_error(fstack, AsmError::new(begin, end, kind).into()),
+            }
+        }
+    },
 }
-PurgeSymName: () = {
-    <begin:@L> <name:AnyIdent> <end:@R> => match symbols.borrow_mut().purge(&name) {
-        Ok(()) => (),
-        Err(kind) => reporter.borrow_mut().report_error(fstack, AsmError::new(begin, end, kind).into()),
-    }
-}
+PurgeSymName = <@L> <AnyIdent> <@R>;
 
 
 // Section definition.
