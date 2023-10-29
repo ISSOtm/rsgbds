@@ -34,8 +34,6 @@ struct State {
 struct Expansion {
     source: Rc<String>,
     offset: usize,
-    /// How many bytes long the text that triggered this expansion is.
-    parent_skip: usize,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -270,12 +268,11 @@ impl<'fstack> Tokenizer<'_, 'fstack, '_, '_, '_, '_> {
         })
     }
 
-    fn begin_expansion(lexer: &mut Lexer, source: Rc<String>, trigger_len: usize) {
-        lexer.cur_state_mut().expansions.push(Expansion {
-            source,
-            offset: 0,
-            parent_skip: trigger_len,
-        })
+    fn begin_expansion(lexer: &mut Lexer, source: Rc<String>) {
+        lexer
+            .cur_state_mut()
+            .expansions
+            .push(Expansion { source, offset: 0 })
     }
 }
 

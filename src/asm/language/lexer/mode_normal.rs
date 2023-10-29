@@ -281,7 +281,6 @@ impl Tokenizer<'_, '_, '_, '_, '_, '_> {
                                             Self::begin_expansion(
                                                 &mut self.lexer.borrow_mut(),
                                                 Rc::clone(equs),
-                                                0,
                                             );
                                         }
                                         continue;

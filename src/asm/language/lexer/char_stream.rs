@@ -12,17 +12,15 @@ impl<'fstack> Tokenizer<'_, 'fstack, '_, '_, '_, '_> {
         cur_state: &'state mut State,
         node: &'node Node,
     ) -> (&'ret str, &'state mut usize) {
-        let mut skip = 0;
         let (source, cur_offset): (&str, _) = 'outer: {
             for expansion in cur_state.expansions.iter_mut().rev() {
                 if !expansion.has_ended() {
                     break 'outer (&expansion.source, &mut expansion.offset);
                 }
-                skip = expansion.parent_skip;
             }
             (node.as_ref(), &mut cur_state.offset)
         };
-        (&source[*cur_offset + skip..], cur_offset)
+        (&source[*cur_offset..], cur_offset)
     }
 
     fn with_cur_source<T, F: FnOnce(&str, &mut usize) -> T>(&self, f: F) -> T {
@@ -51,19 +49,38 @@ impl<'fstack> Tokenizer<'_, 'fstack, '_, '_, '_, '_> {
                 let (source, cur_offset) = Self::get_state_source(lexer.cur_state_mut(), node);
                 let mut chars = source.chars();
 
-                let c = match chars.next() {
-                    // This prevents re-expanding characters that have already been scanned by a previous `peek` without `bump`.
-                    Some(c) if self.macro_arg_scan_distance != 0 => Some(c),
+                // This prevents re-expanding characters that have already been scanned by a previous `peek` without `bump`.
+                if self.macro_arg_scan_distance > 0 {
+                    break chars.next();
+                }
 
+                let c = match chars.next() {
                     Some('\\') if self.expand_macro_args => {
+                        let let_expansions_expire = |lexer: &mut Lexer| {
+                            let expansions = &mut lexer.cur_state_mut().expansions;
+                            while let Some(expansion) = expansions.last() {
+                                if !expansion.has_ended() {
+                                    break;
+                                }
+                                expansions.pop();
+                            }
+                        };
+
                         match self.read_putative_backslash_expansion(chars) {
                             Some((Ok(expansion), trigger_len)) => {
-                                self.macro_arg_scan_distance += trigger_len; // Macro args aren't recursive.
+                                // Skip over the trigger text.
+                                // It's fine to do this "raw", because expansion triggers are always
+                                // contained within a single expansion level anyway.
+                                // (The fact that we're using a single [`str::chars()`] iterator to
+                                // read the trigger should be proof enough.)
+                                *cur_offset += trigger_len;
+                                let_expansions_expire(&mut lexer);
 
                                 // Don't bother doing the expensive work for empty expansions.
                                 if !expansion.is_empty() {
+                                    // Macro args aren't recursive.
                                     self.macro_arg_scan_distance += expansion.len();
-                                    Self::begin_expansion(&mut lexer, expansion, trigger_len);
+                                    Self::begin_expansion(&mut lexer, expansion);
                                 }
                                 continue;
                             }
@@ -85,6 +102,7 @@ impl<'fstack> Tokenizer<'_, 'fstack, '_, '_, '_, '_> {
 
                                 // Skip the bad expansion trigger.
                                 *cur_offset += trigger_len;
+                                let_expansions_expire(&mut lexer);
                                 continue;
                             }
 
@@ -97,6 +115,10 @@ impl<'fstack> Tokenizer<'_, 'fstack, '_, '_, '_, '_> {
                     Some(c) => Some(c),
                     None => None,
                 };
+
+                if c.is_some() {
+                    self.macro_arg_scan_distance += 1; // Do not consider this character again.
+                }
                 break c;
             }
         })
@@ -106,13 +128,9 @@ impl<'fstack> Tokenizer<'_, 'fstack, '_, '_, '_, '_> {
     fn bump_internal(&mut self) -> char {
         let mut lexer = self.lexer.borrow_mut();
 
-        let mut skip = 0;
         let (cur_ofs, bumped_char) = loop {
             if let Some(expansion) = lexer.cur_state_mut().expansions.last_mut() {
                 if expansion.has_ended() {
-                    debug_assert_eq!(skip, 0, "Cannot apply offset to ended expansion!?");
-
-                    skip = expansion.parent_skip;
                     lexer.cur_state_mut().expansions.pop();
                     continue; // Retry with the parent.
                 }
@@ -123,15 +141,17 @@ impl<'fstack> Tokenizer<'_, 'fstack, '_, '_, '_, '_> {
                 );
             } else {
                 let offset = &mut lexer.cur_state_mut().offset;
-                let ofs = *offset + skip; // Account for the "trigger" of any expansion that may have just ended.
+                let cur_offset = *offset;
                 break self
                     .cur_node_handle()
-                    .with_node(|node| (offset, node.as_ref()[ofs..].chars().next()));
+                    .with_node(|node| (offset, node.as_ref()[cur_offset..].chars().next()));
             };
         };
 
+        self.macro_arg_scan_distance -= 1;
+
         let c = bumped_char.expect("Cannot shift at EOF!?");
-        *cur_ofs += skip + c.len_utf8();
+        *cur_ofs += c.len_utf8();
         c
     }
 
