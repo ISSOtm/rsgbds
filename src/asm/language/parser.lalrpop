@@ -168,11 +168,12 @@ MacroInvocation: () = {
             Err(kind) => reporter.borrow_mut().report_error(fstack, AsmError::new(begin, end, kind).into()),
 
             Ok((_, body)) => {
-                let args = MacroArgs::new(args);
-                macro_args.borrow_mut().push(args);
-
-                let mut lexer = lexer.borrow_mut();
-                fstack.push_macro(Rc::clone(body), &mut lexer);
+                fstack.push_macro(
+                    Rc::clone(body),
+                    &mut lexer.borrow_mut(),
+                    MacroArgs::new(args),
+                    &mut macro_args.borrow_mut()
+                );
             }
         }
     },

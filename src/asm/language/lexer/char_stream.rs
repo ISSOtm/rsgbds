@@ -85,11 +85,11 @@ impl<'fstack> Tokenizer<'_, 'fstack, '_, '_, '_, '_> {
 
                                 // Skip the bad expansion trigger.
                                 *cur_offset += trigger_len;
+                                continue;
                             }
 
-                            None => {}
+                            None => Some('\\'), // If it doesn't introduce a macro arg, then just return it.
                         }
-                        Some('\\') // If it doesn't introduce a macro arg, then just return it.
                     }
                     Some('{') if self.enable_interpolation => {
                         todo!();

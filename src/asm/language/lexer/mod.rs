@@ -311,7 +311,10 @@ impl<'fstack> Iterator for Tokenizer<'_, 'fstack, '_, '_, '_, '_> {
                     let loc = Self::location(Some(cur_node.clone()), self.cur_root_offset());
                     // FIXME: if you have a `INCLUDE` at EOL without a newline, this will pop off its parent node *before* excuting the `INCLUDE`!!
                     //        This can be fixed by controlling that the INCLUDE is executed before the newline, but that would require either a "lexer hack" injection (likely right after parsing the `INCLUDE`), or a hand-written parser.
-                    self.fstack.handle_end_of_node(&mut self.lexer.borrow_mut());
+                    self.fstack.handle_end_of_node(
+                        &mut self.lexer.borrow_mut(),
+                        &mut self.macro_args.borrow_mut(),
+                    );
                     return Some(Ok((loc.clone(), Token::Newline, loc)));
                 }
                 Some(token) => token,

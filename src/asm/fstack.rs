@@ -10,6 +10,7 @@ use codespan_reporting::files::Files;
 use crate::{
     input::Storage,
     language::{Lexer, Location},
+    macro_args::MacroArgs,
 };
 
 /// State in the fstack nodes is what needs to persist even after exiting the scope.
@@ -142,20 +143,37 @@ impl Fstack {
         };
     }
 
+    /// Counterpart of [`push_new_node`].
+    ///
     /// # Panics
     ///
     /// This function panics if no more nodes remain.
-    fn pop_node(&self) {
+    pub fn handle_end_of_node(&self, lexer: &mut Lexer, macro_args_stack: &mut Vec<MacroArgs>) {
         let mut inner = self.0.borrow_mut();
-        // Don't touch the current top node, as it might still be referenced!
+        // Don't modify that node, as it might still be referenced!
+        let cur_node_id = inner.cur_node_id.unwrap();
+        let cur_node = &mut inner.nodes[idx(cur_node_id)];
+
+        match cur_node.kind {
+            NodeKind::File(_) => {}
+            NodeKind::Macro(_, _) => {
+                macro_args_stack
+                    .pop()
+                    .expect("Exiting macro with arg stack empty?!?");
+            }
+            // TODO: handle looping for loop nodes (and reset the lexer state as well!)
+            NodeKind::Loop(_) => {}
+        }
 
         // Switch back to its parent node.
-        inner.cur_node_id = inner.nodes[idx(inner.cur_node_id.unwrap())].parent;
+        inner.cur_node_id = cur_node.parent;
 
         // Decrement the (former) parent's count.
         if let Some(id) = inner.cur_node_id {
             inner.nodes[idx(id)].dec_ref_count();
         }
+
+        lexer.pop_state();
     }
 
     pub fn push_file(&self, storage: Storage, lexer: &mut Lexer) {
@@ -163,16 +181,17 @@ impl Fstack {
         lexer.push_new_state();
     }
 
-    pub fn push_macro(&self, body: Rc<String>, lexer: &mut Lexer) {
+    pub fn push_macro(
+        &self,
+        body: Rc<String>,
+        lexer: &mut Lexer,
+        args: MacroArgs,
+        macro_args_stack: &mut Vec<MacroArgs>,
+    ) {
+        macro_args_stack.push(args);
+
         self.push_new_node(NodeKind::Macro((), body));
         lexer.push_new_state();
-    }
-
-    pub fn handle_end_of_node(&self, lexer: &mut Lexer) {
-        // TODO: handle looping for loop nodes (and reset the lexer state as well!)
-
-        self.pop_node();
-        lexer.pop_state();
     }
 }
 
