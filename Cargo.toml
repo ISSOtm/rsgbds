@@ -2,9 +2,16 @@
 name = "rgbds"
 version = "0.1.0"
 edition = "2021"
+#rust-version = "1.73" # 1.74 will drop support for older Apple platforms we wish to keep supporting.
+description = "The premier Game Boy assembly toolchain"
+homepage = "https://rgbds.gbdev.io"
+repository = "https://github.com/gbdev/rgbds"
+license = "MPL-2.0"
+keywords = ["rgbds", "gameboy", "asm", "assembly", "gamedev"]
+categories = ["command-line-utilities", "development-tools::debugging", "game-development"]
 
 # TODO: move bin-only deps to separate features.
-[dependencies] # TODO: audit features
+[dependencies] # TODO: audit deps & features
 codespan-reporting = "0.11.1"
 keyword-trie-gen = { path = "keyword-trie-gen" }
 lalrpop-util = "0.19.8"
