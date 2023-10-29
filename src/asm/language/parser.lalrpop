@@ -210,7 +210,20 @@ Directive: () = {
     "fail" <begin:@L> <msg:StringExpr> <end:@R> => {
         reporter.borrow_mut().report_fatal_error(fstack, AsmError::new(begin, end, AsmErrorKind::Fail(msg)).into());
     },
-    "shift" <amount:NumExpr<Term>?> => todo!(),
+    <begin:@L> "shift" <amount:NumExpr<Term>?> <end:@R> => {
+        let res = match amount {
+            Some(expr) => {
+                expr.try_eval(&symbols.borrow(), macro_args.borrow().last(), &sections.borrow())
+                    .map(|(value, _, _)| value)
+            }
+            None => Ok(1),
+        };
+        res.and_then(|value| {
+            macro_args.borrow_mut().last_mut().ok_or(AsmErrorKind::ShiftOutsideMacro)
+                .and_then(|cur_args| cur_args.shift(value.try_into().unwrap()))
+                .map_err(|kind| AsmError::new(begin, end, kind))
+        }).unwrap_or_else(|error| reporter.borrow_mut().report_error(fstack, error.into()))
+    },
     "assert" => todo!(),
     "static_assert" => todo!(),
 

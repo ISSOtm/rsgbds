@@ -269,6 +269,12 @@ pub enum AsmErrorKind {
     EmptyOptionStack,
     #[display("Empty OPT directive")]
     EmptyOpt,
+    #[display("`SHIFT` cannot be used outside of a macro")]
+    ShiftOutsideMacro,
+    #[display("The shift amount cannot become negative")]
+    NegativeShift(usize, isize),
+    #[display("The shift amount cannot become greater than the number of macro args")]
+    Overshift(usize, usize),
 
     // Section definition errors.
     #[display("{0} is already defined")]
