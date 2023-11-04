@@ -151,7 +151,7 @@ impl Fstack {
         };
     }
 
-    /// Counterpart of [`push_new_node`].
+    /// Counterpart of [`push_new_node`][Self::push_new_node()].
     ///
     /// # Panics
     ///

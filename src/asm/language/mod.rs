@@ -218,12 +218,16 @@ pub enum AsmErrorKind {
     // Lexer errors.
     #[display("Syntax error: unexpected '{0}'")]
     BadChar(char),
-    #[display("Syntax error: a macro argument is being used outside of a macro")]
+    #[display("Syntax error: macro arguments cannot be used outside of a macro")]
     NoActiveMacro,
-    #[display("Syntax error: macro argument '\\0' does not exist")]
+    #[display("Syntax error: macro argument 0 does not exist")]
     NoMacroArg0,
-    #[display("Syntax error: macro argument '\\{0}' is not defined")]
+    #[display("Syntax error: macro argument {0} is not defined")]
     NoMacroArg(u32),
+    #[display("Syntax error: empty bracketed macro argument")]
+    EmptyBracketedMacroArg,
+    #[display("Syntax error: an invalid character was found inside of a bracketed macro argument")]
+    BracketedMacroArgBadChar(Option<char>),
 
     // Syntax errors.
     #[display("Syntax error: unexpected '{0}' at the beginning of the line")]

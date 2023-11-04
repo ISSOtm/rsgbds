@@ -266,9 +266,36 @@ impl<'fstack> Tokenizer<'_, 'fstack, '_, '_, '_, '_> {
                 self.with_active_macro_args(|args| Ok(args.make_concat())),
                 2,
             ),
-            '<' => {
-                todo!();
-            }
+            '<' => match iter.next() {
+                Some(c @ '0'..='9') => {
+                    let mut idx = c as u32 - '0' as u32;
+                    debug_assert!(idx < 10, "{idx}");
+                    let mut len = 3; // The length of `\<0`, which has been matched thus far.
+                    (
+                        loop {
+                            let c = iter.next();
+                            // We are going to match one character, and we want to count it, even if
+                            // it turns out to be invalid.
+                            len += c.map_or(0, char::len_utf8);
+
+                            match c {
+                                Some('>') => break self.try_get_macro_arg(idx),
+                                Some(c @ '0'..='9') => idx = idx * 10 + (c as u32 - '0' as u32),
+                                bad => break Err(AsmErrorKind::BracketedMacroArgBadChar(bad)),
+                            }
+                        },
+                        len,
+                    )
+                }
+
+                Some(c) if can_start_ident(c) => todo!(),
+
+                Some('>') => (Err(AsmErrorKind::EmptyBracketedMacroArg), 3),
+                bad => (
+                    Err(AsmErrorKind::BracketedMacroArgBadChar(bad)),
+                    2 + bad.map_or(0, char::len_utf8),
+                ),
+            },
 
             '@' => (todo!(), 2),
 
