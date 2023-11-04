@@ -401,6 +401,13 @@ impl AsmErrorKind {
     pub fn notes(&self) -> Vec<String> {
         // TODO: ew, `String`s here instead of `Display`?
         match self {
+            Self::BadChar(ch) => {
+                let mut notes = vec![];
+                if !ch.is_ascii() {
+                    notes.push(format!("'{ch}' is U+{:04X}", *ch as u32));
+                }
+                notes
+            }
             Self::DiffMark(_) => vec!["Is it a leftover diff mark?".to_string()],
             Self::UnrecognizedEOF(expected) => {
                 vec![format!("Expected {}", ExpectedTokens(expected))]
