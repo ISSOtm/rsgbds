@@ -60,6 +60,16 @@ Once all of this is done, cleanup time!
   - **Downside**: the grammar is likely to be less obvious, and e.g. conflicts won't be reported (implicitly, they will be solved statically).
     Oh well, such is life.
 
+## License
+
+This port of RGBDS is licensed under the Mozilla Public License, version 2.0.
+
+> This Source Code Form is subject to the terms of the Mozilla Public License,
+> v. 2.0. If a copy of the MPL was not distributed with this file, You can obtain
+> one at http://mozilla.org/MPL/2.0/.
+
+The full text of the MPL v2.0 can be found in the `LICENSE` file.
+
 [vec0]: https://github.com/gbdev/rgbds/blob/2d15e405395912ea4e6bd3b3ce90010427ab44d8/src/asm/charmap.c#L61-L69
 [vec1]: https://github.com/gbdev/rgbds/blob/2d15e405395912ea4e6bd3b3ce90010427ab44d8/src/link/output.c#L85-L96
 [vec2]: https://github.com/gbdev/rgbds/blob/2d15e405395912ea4e6bd3b3ce90010427ab44d8/src/link/output.c#L177-L188
