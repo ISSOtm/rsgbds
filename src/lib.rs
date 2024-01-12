@@ -4,6 +4,7 @@ use std::num::IntErrorKind;
 
 use parse_display::Display;
 
+pub mod object;
 pub mod rpn;
 pub mod section;
 

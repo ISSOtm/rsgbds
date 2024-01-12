@@ -3,6 +3,7 @@
 use std::{collections::HashMap, debug_assert};
 
 use rgbds::{
+    object::SectionsProvider,
     rpn::Rpn,
     section::{Kind, Modifier},
     RelocKind, TruncationLevel,
@@ -117,6 +118,13 @@ impl<'fstack> Sections<'fstack> {
         Ok(())
     }
 
+    pub fn active_section_name(&self) -> Option<SectionId> {
+        self.stack
+            .last()
+            .and_then(|slot| slot.as_ref())
+            .map(|active_sect| SectionId(active_sect.name))
+    }
+
     pub fn active_section<'a>(&'a self) -> Option<SectionHandle<'a, 'fstack>> {
         let top_slot = self.stack.last().and_then(|slot| slot.as_ref())?;
         Some(SectionHandle(
@@ -132,6 +140,10 @@ impl<'fstack> Sections<'fstack> {
             self.sections.get_mut(&top_slot.name).unwrap(),
         ))
     }
+}
+
+impl SectionsProvider for &'_ Sections<'_> {
+    // TODO
 }
 
 #[derive(Debug)]

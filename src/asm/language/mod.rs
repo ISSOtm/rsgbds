@@ -356,6 +356,10 @@ pub enum AsmErrorKind {
     InstrOutsideSection,
     #[display("Only ROM0 and ROMX sections can contain data, not {0}")]
     NotCodeSection(SectionKind),
+
+    // Output file errors.
+    #[display("{0}: {1}")]
+    ObjFileErr(String, rgbds::object::ErrorKind),
 }
 
 impl WarningKind {

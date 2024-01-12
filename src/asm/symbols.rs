@@ -2,13 +2,14 @@
 
 use std::{collections::HashMap, rc::Rc};
 
+use rgbds::object::SymbolsProvider;
 use string_interner::{backend::StringBackend, symbol::SymbolU32, StringInterner, Symbol};
 
 use crate::{
     fstack::Fstack,
     language::{AsmError, AsmErrorKind, Location, SymEvalErrKind},
     macro_args::MacroArgs,
-    sections::Sections,
+    sections::{SectionId, Sections},
 };
 
 #[derive(Debug)]
@@ -286,6 +287,10 @@ impl<'fstack> Symbols<'fstack> {
     }
 }
 
+impl SymbolsProvider for &'_ Symbols<'_> {
+    // TODO
+}
+
 #[derive(Debug)]
 pub struct SymbolData<'fstack> {
     kind: SymbolKind,
@@ -299,7 +304,7 @@ pub enum SymbolKind {
     Constant(i32),
     Variable(i32),
     Label {
-        section: (),
+        section: SectionId,
         offset: u16,
     },
     /// Empty reference, but only numeric types allow that.

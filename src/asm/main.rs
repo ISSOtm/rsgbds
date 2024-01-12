@@ -3,6 +3,8 @@
 // FIXME: these drown out more useful warnings during development. Remove them once a MVP is ready.
 #![allow(dead_code, unused_variables, unreachable_code)]
 
+use rgbds::object::generate_object_file;
+
 use std::{cell::RefCell, fs::File, process::ExitCode};
 
 mod error;
@@ -14,7 +16,7 @@ mod input;
 use input::Storage;
 mod instructions;
 mod language;
-use language::{Lexer, Parser, Tokenizer};
+use language::{AsmError, AsmErrorKind, Lexer, Location, Parser, Tokenizer};
 mod macro_args;
 mod opt;
 mod sections;
@@ -42,6 +44,7 @@ fn main() -> ExitCode {
     let lexer = RefCell::new(Lexer::new());
     let macro_args = RefCell::new(Vec::new());
 
+    // Note: this method is generated from `parser.lalrpop`!
     if let Err(error) = Parser::new().parse(
         &runtime_opts,
         &fstack,
@@ -62,6 +65,22 @@ fn main() -> ExitCode {
         reporter.get_mut().report_fatal_error(&fstack, error);
         return ExitCode::FAILURE;
     };
+
+    let obj_file_path = "/tmp/test.o";
+    let sections = sections.into_inner();
+    let symbols = symbols.into_inner();
+    if let Err(error_kind) =
+        generate_object_file(obj_file_path, fstack.finalize(), &sections, &symbols)
+    {
+        let error = AsmError {
+            begin: Location::builtin(),
+            end: Location::builtin(),
+            kind: AsmErrorKind::ObjFileErr(obj_file_path.into(), error_kind),
+        }
+        .into();
+        reporter.get_mut().report_fatal_error(&fstack, error);
+        return ExitCode::FAILURE;
+    }
 
     ExitCode::SUCCESS
 }

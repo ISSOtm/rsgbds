@@ -2,12 +2,13 @@
 
 use std::{
     cell::{Cell, RefCell},
-    num::NonZeroUsize,
+    num::{NonZeroU32, NonZeroUsize},
     ops::Range,
     rc::Rc,
 };
 
 use codespan_reporting::files::Files;
+use rgbds::object::FileStackNodesProvider;
 
 use crate::{
     input::Storage,
@@ -194,6 +195,39 @@ impl Fstack {
 
         self.push_new_node(NodeKind::Macro((), body));
         lexer.push_new_state();
+    }
+
+    pub fn finalize(&self) -> impl FileStackNodesProvider + '_ {
+        FinalizedFstack(self.0.borrow())
+    }
+}
+
+struct FinalizedFstack<'fstack>(std::cell::Ref<'fstack, FstackImpl>);
+impl FileStackNodesProvider for FinalizedFstack<'_> {
+    type Node = Node;
+
+    type Iter<'slice> = std::iter::Filter<std::slice::Iter<'slice, Self::Node>, for<'a> fn(&'a &'slice Self::Node) -> bool>
+    where
+        Self: 'slice;
+
+    fn nodes(&self) -> Self::Iter<'_> {
+        fn is_referenced(node: &&Node) -> bool {
+            node.ref_count.get() != 0
+        }
+        self.0.nodes.iter().filter(is_referenced)
+    }
+
+    fn parent_info(node: &Self::Node) -> Option<(NonZeroU32, u32)> {
+        // TODO: the ID is wrong! What if there *are* unref'd nodes?
+        node.parent.map(|id| (id.try_into().unwrap(), 0)) // TODO: parent line no
+    }
+
+    fn node_kind(node: &Self::Node) -> rgbds::object::NodeKind {
+        match &node.kind {
+            NodeKind::File(storage) => rgbds::object::NodeKind::File(storage.name().into()),
+            NodeKind::Macro(_, _) => todo!(),
+            NodeKind::Loop(_) => todo!(),
+        }
     }
 }
 
