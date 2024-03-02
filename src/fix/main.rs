@@ -250,14 +250,16 @@ fn main() {
     }
 
     if let Some(mbc_type) = cli.mbc_type {
-        let mbc_type_result = mbc_type_str.parse::<MbcType>();
+        let mbc_type_result = mbc_type.parse::<MbcType>();
         match mbc_type_result {
             Ok(mbc_type) => {
                 cli_options.cartridge_type = mbc_type;
             },
             Err(e) => {
                 eprintln!("Error parsing MbcType.");
-                cli_options.cartridge_type = MbcType::Bad;
+                cli_options.cartridge_type = MbcType::MbcBad;
+            }
+        }
         match cli_options.cartridge_type {
             MbcType::MbcBad => eprintln!("Unknown MBC \"%s\"\nAccepted MBC names:\n {}", mbc_type),
             MbcType::MbcWrongFeatures => eprintln!("Features incompatible with MBC (\"%s\")\nAccepted combinations:\n {}", mbc_type),
@@ -384,6 +386,56 @@ enum MbcType {
     MbcBad,
     MbcWrongFeatures,
     MbcBadRange,
+}
+
+fn get_mbc_type_code(mbc_type: MbcType) -> u8 {
+    match mbc_type {
+        MbcType::Rom => 0x00,
+        MbcType::RomRam => 0x08,
+        MbcType::RomRamBattery => 0x09,
+        MbcType::Mbc1 => 0x01,
+        MbcType::Mbc1Ram => 0x02,
+        MbcType::Mbc1RamBattery => 0x03,
+        MbcType::Mbc2 => 0x05,
+        MbcType::Mbc2Battery => 0x06,
+        MbcType::Mmm01 => 0x0B,
+        MbcType::Mmm01Ram => 0x0C,
+        MbcType::Mmm01RamBattery => 0x0D,
+        MbcType::Mbc3 => 0x11,
+        MbcType::Mbc3TimerBattery => 0x0F,
+        MbcType::Mbc3TimerRamBattery => 0x10,
+        MbcType::Mbc3Ram => 0x12,
+        MbcType::Mbc3RamBattery => 0x13,
+        MbcType::Mbc5 => 0x19,
+        MbcType::Mbc5Ram => 0x1A,
+        MbcType::Mbc5RamBattery => 0x1B,
+        MbcType::Mbc5Rumble => 0x1C,
+        MbcType::Mbc5RumbleRam => 0x1D,
+        MbcType::Mbc5RumbleRamBattery => 0x1E,
+        MbcType::Mbc6 => 0x20,
+        MbcType::Mbc7SensorRumbleRamBattery => 0x22,
+        MbcType::PocketCamera => 0xFC,
+        MbcType::BandaiTama5 => 0xFD,
+        MbcType::Huc3 => 0xFE,
+        MbcType::Huc1RamBattery => 0xFF,
+        MbcType::Tpp1 => 0x100,
+        MbcType::Tpp1Rumble => 0x101,
+        MbcType::Tpp1MultiRumble => 0x102,
+        MbcType::Tpp1MultiRumbleRumble => 0x103,
+        MbcType::Tpp1Timer => 0x104,
+        MbcType::Tpp1TimerRumble => 0x105,
+        MbcType::Tpp1TimerMultiRumble => 0x106,
+        MbcType::Tpp1TimerMultiRumbleRumble => 0x107,
+        MbcType::Tpp1Battery => 0x108,
+        MbcType::Tpp1BatteryRumble => 0x109,
+        MbcType::Tpp1BatteryMultiRumble => 0x10A,
+        MbcType::Tpp1BatteryMultiRumbleRumble => 0x10B,
+        MbcType::Tpp1BatteryTimer => 0x10C,
+        MbcType::Tpp1BatteryTimerRumble => 0x10D,
+        MbcType::Tpp1BatteryTimerMultiRumble => 0x10E,
+        MbcType::Tpp1BatteryTimerMultiRumbleRumble => 0x10F,
+        MbcType::MbcNone => 0x00, // Assuming this maps to 0x00, adjust as needed
+    }
 }
 
 fn get_mbc_enum(mbc_type: u8) -> MbcType {
@@ -654,26 +706,26 @@ fn process_file(input: &mut File, output: &mut File, name: &str, file_size: u64,
     }
 
     let mut rom0 = [0u8; BANK_SIZE];
-    let rom0_len = read_bytes(input, &mut rom0);
+    let rom0_len = match read_bytes(input, &mut rom0) {
+        Ok(corr_len) => corr_len,
+        Err(e) => { eprintln!("Invalid file input."); 0 }// TOCHECK: Crash instead of default 0 value
+    };
+    let header_size = if get_mbc_type_code(options.cartridge_type) & 0xFF00 == get_mbc_type_code(MbcType::Tpp1) { 0x154 } else { 0x150 };
 
-    let header_size = if options.cartridge_type & 0xFF00 == MbcType::Tpp1 { 0x154 } else { 0x150 };
-
-    if rom0_len == -1 {
-        eprintln!("FATAL: Failed to read \"{}\"'s header", name);
-        return Err(io::Error::new(io::ErrorKind::Other, "Failed to read header"));
-    } else if rom0_len < header_size as usize {
+    if rom0_len < header_size as usize {
         eprintln!("FATAL: \"{}\" too short, expected at least {} bytes, got only {}",
                  name, header_size, rom0_len);
         return Err(io::Error::new(io::ErrorKind::Other, "File too short"));
     }
 
-    if options.fix_spec & (FixSpec::FixLogo | FixSpec::TrashLogo) {
-        if options.fix_spec & FixSpec::FixLogo {
-            overwrite_bytes(&mut rom0, 0x0104, &NINTENDO_LOGO, "Nintendo logo");
-        }
-        else {
-            overwrite_bytes(&mut rom0, 0x0104, &TRASH_LOGO, "Nintendo logo");
-        }
+    for fix_spec in options.fix_spec {
+        if matches!(fix_spec, FixSpec::FixLogo) || matches!(fix_spec, FixSpec::TrashLogo) {
+            match fix_spec {
+                FixSpec::FixLogo => overwrite_bytes(&mut rom0, 0x0104, &NINTENDO_LOGO, "Nintendo logo"),
+                FixSpec::TrashLogo => overwrite_bytes(&mut rom0, 0x0104, &TRASH_LOGO, "Nintendo logo"),
+                _ => Ok(()),
+            };
+        };
     }
 
     if let Some(title) = options.title {
@@ -688,9 +740,9 @@ fn process_file(input: &mut File, output: &mut File, name: &str, file_size: u64,
         match options.model {
             Model::BOTH => overwrite_byte(&mut rom0, 0x143, 0x80, "CGB flag"),
             Model::CGB => overwrite_byte(&mut rom0, 0x143, 0xC0, "CGB flag"),
-            _ => (),
-        }
-    }
+            _ => Ok(()),
+        };
+    };
 
     if let Some(new_licensee) = options.new_licensee {
         overwrite_bytes(&mut rom0[..], 0x144, new_licensee.as_bytes(), "new licensee code");
@@ -703,10 +755,10 @@ fn process_file(input: &mut File, output: &mut File, name: &str, file_size: u64,
     let cartridge_type = options.cartridge_type;
     let ram_size = options.ram_size;
 
-    if cartridge_type < MbcType::MbcNone {
+    if get_mbc_type_code(cartridge_type) < get_mbc_type_code(MbcType::MbcNone) {
         let byte = cartridge_type as u8;
 
-        if (cartridge_type & MbcType::Tpp1) == MbcType::Tpp1 {
+        if (get_mbc_type_code(cartridge_type) & get_mbc_type_code(MbcType::Tpp1)) == get_mbc_type_code(MbcType::Tpp1) {
             // Cartridge type isn't directly actionable, translate it
             let byte = 0xBC;
             // The other TPP1 identification bytes will be written below
@@ -716,7 +768,7 @@ fn process_file(input: &mut File, output: &mut File, name: &str, file_size: u64,
 
     // ROM size will be written last, after evaluating the file's size
 
-    if (cartridge_type & MbcType::Tpp1) == MbcType::Tpp1 {
+    if (get_mbc_type_code(cartridge_type) & get_mbc_type_code(MbcType::Tpp1)) == get_mbc_type_code(MbcType::Tpp1) {
         let tpp1_code = vec![0xC1, 0x65];
         let tpp1_rev = vec![0xC1, 0x65]; // TODO WARNING PLACEHOLDER NOT ACTUAL VALUES, PICK UP FROM OPTIONS INSTEAD?
 
@@ -729,7 +781,7 @@ fn process_file(input: &mut File, output: &mut File, name: &str, file_size: u64,
             overwrite_byte(&mut rom0, 0x152, ram_size, "RAM size");
         }
 
-        overwrite_byte(&mut rom0, 0x153, (cartridge_type & 0xFF) as u8, "TPP1 feature flags");
+        overwrite_byte(&mut rom0, 0x153, (get_mbc_type_code(cartridge_type) & 0xFF) as u8, "TPP1 feature flags");
     } else {
         // Regular mappers
 
@@ -743,13 +795,13 @@ fn process_file(input: &mut File, output: &mut File, name: &str, file_size: u64,
     }
 
     if let Some(old_licensee) = options.old_licensee {
-        overwrite_byte(&mut rom0, 0x14B, old_licensee, "old licensee code");
+        overwrite_byte(&mut rom0, 0x14B, old_licensee as u8, "old licensee code");
     } else if options.sgb && rom0[0x14B] != 0x33 {
         eprintln!("warning: SGB compatibility enabled, but old licensee was 0x{:02x}, not 0x33", rom0[0x14B]);
     }
     
     if let Some(rom_version) = options.rom_version {
-        overwrite_byte(&mut rom0, 0x14C, rom_version, "mask ROM version number");
+        overwrite_byte(&mut rom0, 0x14C, rom_version as u8, "mask ROM version number");
     }
     
 }
