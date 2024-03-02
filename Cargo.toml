@@ -29,7 +29,7 @@ lalrpop = { version = "0.19.8", default-features = false }
 
 [[bin]]
 name = "rgbasm"
-path = "src/asm/main.rs"
+path = "src/fix/main.rs"
 
 [workspace]
 members = ["keyword-trie-gen", "warnings-gen"]

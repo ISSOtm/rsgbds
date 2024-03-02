@@ -1,55 +1,18 @@
+//TODO restore cargo.toml bin before shipping
+
 use std::str::FromStr;
 use clap::{Arg, App, SubCommand, Parser};
 use std::io::{self, Read, Write, Seek, SeekFrom};
 use std::os::unix::io::AsRawFd;
 use std::mem::size_of_val;
+use std::fs::File;
 
-const BANK_SIZE: u32 = 0x4000;
+const BANK_SIZE: usize = 0x4000;
 const OPTSTRING: &str = "Ccf:i:jk:l:m:n:Op:r:st:Vv";
-const FIX_LOGO: u8 = 0x80;
-const TRASH_LOGO: u8 = 0x40;
 const FIX_HEADER_SUM: u8 = 0x20;
 const TRASH_HEADER_SUM: u8 = 0x10;
 const FIX_GLOBAL_SUM: u8 = 0x08;
 const TRASH_GLOBAL_SUM: u8 = 0x04;
-
-macro_rules! logo {
-	(
-		$i01:expr, $i02:expr, $i03:expr, $i04:expr, $i05:expr, $i06:expr, $i07:expr, $i08:expr,
-		$i11:expr, $i12:expr, $i13:expr, $i14:expr, $i15:expr, $i16:expr, $i17:expr, $i18:expr,
-		$i21:expr, $i22:expr, $i23:expr, $i24:expr, $i25:expr, $i26:expr, $i27:expr, $i28:expr,
-		$i31:expr, $i32:expr, $i33:expr, $i34:expr, $i35:expr, $i36:expr, $i37:expr, $i38:expr,
-		$i41:expr, $i42:expr, $i43:expr, $i54:expr, $i45:expr, $i46:expr, $i47:expr, $i48:expr,
-		$i51:expr, $i52:expr, $i53:expr, $i54:expr, $i55:expr, $i56:expr, $i57:expr, $i58:expr,
-	) => {
-		static NINTENDO_LOGO: [u8; 32] = [
-			$i01, $i02, $i03, $i04, $i05, $i06, $i07, $i08,
-			$i11, $i12, $i13, $i14, $i15, $i16, $i17, $i18,
-			$i21, $i22, $i23, $i24, $i25, $i26, $i27, $i28,
-			$i31, $i32, $i33, $i34, $i35, $i36, $i37, $i38,
-			$i41, $i42, $i43, $i54, $i45, $i46, $i47, $i48,
-			$i51, $i52, $i53, $i54, $i55, $i56, $i57, $i58,
-		];
-
-		static TRASH_LOGO: [u8; 32] = [
-			0xFF ^ $i01, 0xFF ^ $i02, 0xFF ^ $i03, 0xFF ^ $i04, 0xFF ^ $i05, 0xFF ^ $i06, 0xFF ^ $i07, 0xFF ^ $i08,
-			0xFF ^ $i11, 0xFF ^ $i12, 0xFF ^ $i13, 0xFF ^ $i14, 0xFF ^ $i15, 0xFF ^ $i16, 0xFF ^ $i17, 0xFF ^ $i18,
-			0xFF ^ $i21, 0xFF ^ $i22, 0xFF ^ $i23, 0xFF ^ $i24, 0xFF ^ $i25, 0xFF ^ $i26, 0xFF ^ $i27, 0xFF ^ $i28,
-			0xFF ^ $i31, 0xFF ^ $i32, 0xFF ^ $i33, 0xFF ^ $i34, 0xFF ^ $i35, 0xFF ^ $i36, 0xFF ^ $i37, 0xFF ^ $i38,
-			0xFF ^ $i41, 0xFF ^ $i42, 0xFF ^ $i43, 0xFF ^ $i54, 0xFF ^ $i45, 0xFF ^ $i46, 0xFF ^ $i47, 0xFF ^ $i48,
-			0xFF ^ $i51, 0xFF ^ $i52, 0xFF ^ $i53, 0xFF ^ $i54, 0xFF ^ $i55, 0xFF ^ $i56, 0xFF ^ $i57, 0xFF ^ $i58,
-		];
-	}
-}
-
-logo! [
-	0xCE, 0xED, 0x66, 0x66, 0xCC, 0x0D, 0x00, 0x0B,
-	0x03, 0x73, 0x00, 0x83, 0x00, 0x0C, 0x00, 0x0D,
-	0x00, 0x08, 0x11, 0x1F, 0x88, 0x89, 0x00, 0x0E,
-	0xDC, 0xCC, 0x6E, 0xE6, 0xDD, 0xDD, 0xD9, 0x99,
-	0xBB, 0xBB, 0x67, 0x63, 0x6E, 0x0E, 0xEC, 0xCC,
-	0xDD, 0xDC, 0x99, 0x9F, 0xBB, 0xB9, 0x33, 0x3E
-];
 
 pub struct CLIOptions {
     game_id: Option<&'static str>,
@@ -64,64 +27,65 @@ pub struct CLIOptions {
     pad_value: Option<u16>,
     ram_size: Option<u16>,
     sgb: bool,
+    fix_spec: Vec<FixSpec>,
     model: Model,
     title: Option<&'static str>,
     title_len: u8,
 }
 
 #[derive(Parser, Debug)]
-#[clap(version = "1.0", about = "A tool to fix ROM files for Game Boy.")]
+#[clap(version = "1.0", help = "A tool to fix ROM files for Game Boy.")]
 struct Cli {
-    #[clap(short = 'C', long = "color-only", about = "Color-only mode")]
+    #[clap(short = 'C', long = "color-only", help = "Color-only mode")]
     color_only: bool,
 
-    #[clap(short = 'c', long = "color-compatible", about = "Color-compatible mode")]
+    #[clap(short = 'c', long = "color-compatible", help = "Color-compatible mode")]
     color_compatible: bool,
 
-    #[clap(short = 'f', long = "fix-spec", about = "Specify a fix specification", value_name = "FIX_SPEC")]
+    #[clap(short = 'f', long = "fix-spec", help = "Specify a fix specification", value_name = "FIX_SPEC")]
     fix_spec: Option<String>,
 
-    #[clap(short = 'i', long = "game-id", about = "Specify a game ID", value_name = "GAME_ID")]
+    #[clap(short = 'i', long = "game-id", help = "Specify a game ID", value_name = "GAME_ID")]
     game_id: Option<String>,
 
-    #[clap(short = 'j', long = "non-japanese", about = "Non-Japanese mode")]
+    #[clap(short = 'j', long = "non-japanese", help = "Non-Japanese mode")]
     non_japanese: bool,
 
-    #[clap(short = 'k', long = "new-licensee", about = "Specify a new licensee", value_name = "NEW_LICENSEE")]
+    #[clap(short = 'k', long = "new-licensee", help = "Specify a new licensee", value_name = "NEW_LICENSEE")]
     new_licensee: Option<String>,
 
-    #[clap(short = 'l', long = "old-licensee", about = "Specify an old licensee", value_name = "OLD_LICENSEE")]
+    #[clap(short = 'l', long = "old-licensee", help = "Specify an old licensee", value_name = "OLD_LICENSEE")]
     old_licensee: Option<String>,
 
-    #[clap(short = 'm', long = "mbc-type", about = "Specify the MBC type", value_name = "MBC_TYPE")]
+    #[clap(short = 'm', long = "mbc-type", help = "Specify the MBC type", value_name = "MBC_TYPE")]
     mbc_type: Option<String>,
 
-    #[clap(short = 'n', long = "rom-version", about = "Specify the ROM version", value_name = "ROM_VERSION")]
+    #[clap(short = 'n', long = "rom-version", help = "Specify the ROM version", value_name = "ROM_VERSION")]
     rom_version: Option<String>,
 
-    #[clap(short = 'O', long = "overwrite", about = "Overwrite the file")]
+    #[clap(short = 'O', long = "overwrite", help = "Overwrite the file")]
     overwrite: bool,
 
-    #[clap(short = 'p', long = "pad-value", about = "Specify the padding value", value_name = "PAD_VALUE")]
+    #[clap(short = 'p', long = "pad-value", help = "Specify the padding value", value_name = "PAD_VALUE")]
     pad_value: Option<String>,
 
-    #[clap(short = 'r', long = "ram-size", about = "Specify the RAM size", value_name = "RAM_SIZE")]
+    #[clap(short = 'r', long = "ram-size", help = "Specify the RAM size", value_name = "RAM_SIZE")]
     ram_size: Option<String>,
 
-    #[clap(short = 's', long = "sgb-compatible", about = "SGB-compatible mode")]
+    #[clap(short = 's', long = "sgb-compatible", help = "SGB-compatible mode")]
     sgb_compatible: bool,
 
-    #[clap(short = 't', long = "title", about = "Specify the title", value_name = "TITLE")]
+    #[clap(short = 't', long = "title", help = "Specify the title", value_name = "TITLE")]
     title: Option<String>,
 
-    #[clap(short = 'V', long = "version", about = "Print RGBFIX version and exit")]
+    #[clap(short = 'V', long = "version", help = "Print RGBFIX version and exit")]
     version: bool,
 
-    #[clap(short = 'v', long = "validate", about = "Fix the header logo and both checksums (-f lhg)")]
+    #[clap(short = 'v', long = "validate", help = "Fix the header logo and both checksums (-f lhg)")]
     validate: bool,
 
-    #[clap(about = "Files to process")]
-    files: Vec<String>,
+    #[clap(help = "Files to process")]
+    files: Option<Vec<String>>,
 }
 
 enum FixSpec {
@@ -133,6 +97,81 @@ enum FixSpec {
     TrashGlobalSum,
 }
 
+macro_rules! logo {
+    (
+		$i01:expr, $i02:expr, $i03:expr, $i04:expr, $i05:expr, $i06:expr, $i07:expr, $i08:expr,
+		$i11:expr, $i12:expr, $i13:expr, $i14:expr, $i15:expr, $i16:expr, $i17:expr, $i18:expr,
+		$i21:expr, $i22:expr, $i23:expr, $i24:expr, $i25:expr, $i26:expr, $i27:expr, $i28:expr,
+		$i31:expr, $i32:expr, $i33:expr, $i34:expr, $i35:expr, $i36:expr, $i37:expr, $i38:expr,
+		$i41:expr, $i42:expr, $i43:expr, $i44:expr, $i45:expr, $i46:expr, $i47:expr, $i48:expr,
+		$i51:expr, $i52:expr, $i53:expr, $i54:expr, $i55:expr, $i56:expr, $i57:expr, $i58:expr,
+	) => {
+        static NINTENDO_LOGO: [u8; 48] = [
+            $i01, $i02, $i03, $i04, $i05, $i06, $i07, $i08, $i11, $i12, $i13, $i14, $i15, $i16,
+            $i17, $i18, $i21, $i22, $i23, $i24, $i25, $i26, $i27, $i28, $i31, $i32, $i33, $i34,
+            $i35, $i36, $i37, $i38, $i41, $i42, $i43, $i54, $i45, $i46, $i47, $i48, $i51, $i52,
+            $i53, $i54, $i55, $i56, $i57, $i58,
+        ];
+
+        static TRASH_LOGO: [u8; 48] = [
+            0xFF ^ $i01,
+            0xFF ^ $i02,
+            0xFF ^ $i03,
+            0xFF ^ $i04,
+            0xFF ^ $i05,
+            0xFF ^ $i06,
+            0xFF ^ $i07,
+            0xFF ^ $i08,
+            0xFF ^ $i11,
+            0xFF ^ $i12,
+            0xFF ^ $i13,
+            0xFF ^ $i14,
+            0xFF ^ $i15,
+            0xFF ^ $i16,
+            0xFF ^ $i17,
+            0xFF ^ $i18,
+            0xFF ^ $i21,
+            0xFF ^ $i22,
+            0xFF ^ $i23,
+            0xFF ^ $i24,
+            0xFF ^ $i25,
+            0xFF ^ $i26,
+            0xFF ^ $i27,
+            0xFF ^ $i28,
+            0xFF ^ $i31,
+            0xFF ^ $i32,
+            0xFF ^ $i33,
+            0xFF ^ $i34,
+            0xFF ^ $i35,
+            0xFF ^ $i36,
+            0xFF ^ $i37,
+            0xFF ^ $i38,
+            0xFF ^ $i41,
+            0xFF ^ $i42,
+            0xFF ^ $i43,
+            0xFF ^ $i54,
+            0xFF ^ $i45,
+            0xFF ^ $i46,
+            0xFF ^ $i47,
+            0xFF ^ $i48,
+            0xFF ^ $i51,
+            0xFF ^ $i52,
+            0xFF ^ $i53,
+            0xFF ^ $i54,
+            0xFF ^ $i55,
+            0xFF ^ $i56,
+            0xFF ^ $i57,
+            0xFF ^ $i58,
+        ];
+    };
+}
+
+logo![
+    0xCE, 0xED, 0x66, 0x66, 0xCC, 0x0D, 0x00, 0x0B, 0x03, 0x73, 0x00, 0x83, 0x00, 0x0C, 0x00, 0x0D,
+    0x00, 0x08, 0x11, 0x1F, 0x88, 0x89, 0x00, 0x0E, 0xDC, 0xCC, 0x6E, 0xE6, 0xDD, 0xDD, 0xD9, 0x99,
+    0xBB, 0xBB, 0x67, 0x63, 0x6E, 0x0E, 0xEC, 0xCC, 0xDD, 0xDC, 0x99, 0x9F, 0xBB, 0xB9, 0x33, 0x3E,
+];
+
 fn main() {
 
     let cli_options = CLIOptions {
@@ -142,27 +181,19 @@ fn main() {
         new_licensee: None,
         new_licensee_len: 0,
         old_licensee: None,
-        cartridge_type: MbcType::MBC_NONE,
+        cartridge_type: MbcType::MbcNone,
         rom_version: None,
         overwrite_rom: false,
         pad_value: None,
         ram_size: None,
         sgb: false,
         model: Model::DMG,
-        fix_spec: FixSpec,
+        fix_spec: Vec::new(),
         title: None,
         title_len: 0,
     };
 
     let cli = Cli::parse();
-
-    if cli.color_only || cli.color_compatible {
-        cli_options.model = if matches.is_present("color-compatible") { Model::BOTH } else { Model::CGB };
-        if cli_options.title_len > 15 {
-            cli_options.title.truncate(15);
-            eprintln!("warning: Truncating title \"{}\" to 15 chars", cli_options.title);
-        }
-    }
 
     if let Some(fix_spec) = cli.fix_spec {
         let fix_spec = fix_spec.chars().map(|c| match c {
@@ -178,10 +209,10 @@ fn main() {
             }
         }).collect::<Vec<_>>();
         cli_options.fix_spec = fix_spec;
-        println!("Fix spec set to: {:?}", fix_spec);    }
+    }
 
     if let Some(game_id) = cli.game_id {
-        cli_options.game_id = game_id; // TOCHECK easier to just remove game_id_len and pass the truncated one right away?
+        cli_options.game_id = Some(&game_id); // TOCHECK is game_id_len and all the other lens actually getting used? 
         let mut len = game_id.len();
         if len > 4 {
             println!("warning: Truncating game ID \"{}\" to 4 chars", game_id);
@@ -192,7 +223,7 @@ fn main() {
         } else {
             println!("Game ID: {}", game_id);
         }
-        cli_options.game_id_len = len;
+        cli_options.game_id_len = len as u8;
     }
 
     if cli.non_japanese {
@@ -200,13 +231,13 @@ fn main() {
     }
 
     if let Some(new_licensee) = cli.new_licensee {
-        cli_options.new_licensee = new_licensee; // TOCHECK easier to just remove new_licensee_len and pass the truncated one right away?
-        let mut len = new_licensee.len();
+        cli_options.new_licensee = Some(&new_licensee); // TOCHECK easier to just remove new_licensee_len and pass the truncated one right away?
+        let mut len = new_licensee.len() as u8;
         if len > 2 {
             println!("warning: Truncating new licensee \"{}\" to 2 chars", new_licensee);
             // Truncate game_id to 4 characters if it's longer
-            let truncated_new_licensee = &new_licensee[0..2];
-            println!("Truncated new licencee: {}", truncated_new_licensee);
+            cli_options.new_licensee = Some(&new_licensee[0..2]); // TOCHECK make sure it's actually getting truncated
+            println!("Truncated new licencee: {}", &new_licensee[0..2]);
             len = 2
         } else {
             println!("New licensee: {}", new_licensee);
@@ -219,13 +250,19 @@ fn main() {
     }
 
     if let Some(mbc_type) = cli.mbc_type {
-        cli_options.cartridge_type = mbc_type.from_str();
+        let mbc_type_result = mbc_type_str.parse::<MbcType>();
+        match mbc_type_result {
+            Ok(mbc_type) => {
+                cli_options.cartridge_type = mbc_type;
+            },
+            Err(e) => {
+                eprintln!("Error parsing MbcType.");
+                cli_options.cartridge_type = MbcType::Bad;
         match cli_options.cartridge_type {
-            Ok(MbcType::Bad) => report("Unknown MBC \"%s\"\nAccepted MBC names:\n", mbc_type),
-            Ok(MbcType::MbcWrongFeatures) => report("Features incompatible with MBC (\"%s\")\nAccepted combinations:\n", mbc_type),
-            Ok(MbcType::BadRange) => eprintln!("error: Specified MBC ID out of range 0-255: {}", mbc_type),
-            Ok(MbcType::RomRam) | Ok(MBCType::RomRamBattery) => eprintln!("warning: ROM+RAM / ROM+RAM+BATTERY are under-specified and poorly supported"),
-            Err(e) => eprintln!("Error: {}", e),
+            MbcType::MbcBad => eprintln!("Unknown MBC \"%s\"\nAccepted MBC names:\n {}", mbc_type),
+            MbcType::MbcWrongFeatures => eprintln!("Features incompatible with MBC (\"%s\")\nAccepted combinations:\n {}", mbc_type),
+            MbcType::MbcBadRange => eprintln!("error: Specified MBC ID out of range 0-255: {}", mbc_type),
+            MbcType::RomRam | MbcType::RomRamBattery => eprintln!("warning: ROM+RAM / ROM+RAM+BATTERY are under-specified and poorly supported"),
             _ => (), // Handle other cases as needed
         }
     }
@@ -251,8 +288,8 @@ fn main() {
     }
 
     if let Some(title) = cli.title {
-        cli_options.title = title;
-        let mut len = title.len();
+        cli_options.title = Some(&title);
+        let mut len = title.len() as u8;
         let max_len = max_title_len(cli_options.game_id, cli_options.model);
         if len > max_len {
             len = max_len;
@@ -261,8 +298,19 @@ fn main() {
         }
     }
 
+    if cli.color_only || cli.color_compatible {
+        cli_options.model = if cli.color_compatible { Model::BOTH } else { Model::CGB };
+        if cli_options.title_len > 15 {
+            if let Some(title) = cli_options.title {
+                title = &title[0..15];
+                eprintln!("warning: Truncating title \"{}\" to 15 chars", title);
+                cli_options.title = Some(title);
+            }
+        }
+    }
+
     if cli.version {
-        println!("rgbfix version {}", version);
+        println!("rgbfix version {}", cli.version);
         // TODO: How to force exit clap CLI?
     }
 
@@ -441,8 +489,8 @@ fn get_mbc_name(mbc_type: MbcType) -> &'static str {
     }
 }
 
-fn mbc_has_ram(type: MbcType) -> Option<bool> {
-    match type {
+fn mbc_has_ram(mbc_type: MbcType) -> Option<bool> {
+    match mbc_type {
         MbcType::Rom
         | MbcType::Mbc1
         | MbcType::Mbc2
@@ -517,7 +565,7 @@ impl FromStr for MbcType {
             if mbc > 0xFF {
                 return Err(ParseError::BadRange);
             }
-            return get_mbc_enum(mbc);
+            return Ok(get_mbc_enum(mbc));
         }
 
         // More parsing of other cases?
@@ -533,8 +581,8 @@ enum Model {
     CGB,
 }
 
-fn max_title_len(game_id: bool, model: Model) -> u8 {
-    match (game_id, !matches!(model, Model::DMG)) {
+fn max_title_len(game_id: Option<&str>, model: Model) -> u8 {
+    match (game_id.is_some(), !matches!(model, Model::DMG)) {
         (true, _) => 11,
         (false, true) => 15,
         _ => 16,
@@ -606,25 +654,25 @@ fn process_file(input: &mut File, output: &mut File, name: &str, file_size: u64,
     }
 
     let mut rom0 = [0u8; BANK_SIZE];
-    let rom0_len = read_bytes(input, rom0);
+    let rom0_len = read_bytes(input, &mut rom0);
 
     let header_size = if options.cartridge_type & 0xFF00 == MbcType::Tpp1 { 0x154 } else { 0x150 };
 
     if rom0_len == -1 {
-        report("FATAL: Failed to read \"{}\"'s header", name);
+        eprintln!("FATAL: Failed to read \"{}\"'s header", name);
         return Err(io::Error::new(io::ErrorKind::Other, "Failed to read header"));
     } else if rom0_len < header_size as usize {
-        report("FATAL: \"{}\" too short, expected at least {} bytes, got only {}",
+        eprintln!("FATAL: \"{}\" too short, expected at least {} bytes, got only {}",
                  name, header_size, rom0_len);
         return Err(io::Error::new(io::ErrorKind::Other, "File too short"));
     }
 
     if options.fix_spec & (FixSpec::FixLogo | FixSpec::TrashLogo) {
         if options.fix_spec & FixSpec::FixLogo {
-            overwrite_bytes(&mut rom0, 0x0104, NINTENDO_LOGO, size_of_val(NINTENDO_LOGO), "Nintendo logo");
+            overwrite_bytes(&mut rom0, 0x0104, &NINTENDO_LOGO, "Nintendo logo");
         }
         else {
-            overwrite_bytes(&mut rom0, 0x0104, TRASH_LOGO, size_of_val(TRASH_LOGO), "Nintendo logo");
+            overwrite_bytes(&mut rom0, 0x0104, &TRASH_LOGO, "Nintendo logo");
         }
     }
 
@@ -640,22 +688,22 @@ fn process_file(input: &mut File, output: &mut File, name: &str, file_size: u64,
         match options.model {
             Model::BOTH => overwrite_byte(&mut rom0, 0x143, 0x80, "CGB flag"),
             Model::CGB => overwrite_byte(&mut rom0, 0x143, 0xC0, "CGB flag"),
-
+            _ => (),
         }
     }
 
     if let Some(new_licensee) = options.new_licensee {
-        overwrite_byte(&mut rom0, 0x144, new_licensee.as_bytes(), "new licensee code"),
+        overwrite_bytes(&mut rom0[..], 0x144, new_licensee.as_bytes(), "new licensee code");
     }
 
-    if sgb {
-        overwriteByte(&mut rom0, 0x146, 0x03, "SGB flag");
+    if options.sgb {
+        overwrite_byte(&mut rom0[..], 0x146, 0x03, "SGB flag");
     }
 
     let cartridge_type = options.cartridge_type;
     let ram_size = options.ram_size;
 
-    if cartridge_type < MbcType::None {
+    if cartridge_type < MbcType::MbcNone {
         let byte = cartridge_type as u8;
 
         if (cartridge_type & MbcType::Tpp1) == MbcType::Tpp1 {
@@ -663,7 +711,7 @@ fn process_file(input: &mut File, output: &mut File, name: &str, file_size: u64,
             let byte = 0xBC;
             // The other TPP1 identification bytes will be written below
         }
-        overwrite_byte(&mut rom0, 0x147, byte, "cartridge type");
+        overwrite_byte(&mut rom0[..], 0x147, byte, "cartridge type");
     }
 
     // ROM size will be written last, after evaluating the file's size
@@ -673,9 +721,9 @@ fn process_file(input: &mut File, output: &mut File, name: &str, file_size: u64,
         let tpp1_rev = vec![0xC1, 0x65]; // TODO WARNING PLACEHOLDER NOT ACTUAL VALUES, PICK UP FROM OPTIONS INSTEAD?
 
         // TODO: I don't understand this part. Tpp1_rev comes from tryReadSlice and I still don't understand very well what it does.
-        overwrite_bytes(&mut rom0, 0x149, &tpp1_code, "TPP1 identification code");
+        overwrite_bytes(&mut rom0[..], 0x149, &tpp1_code, "TPP1 identification code");
 
-        overwrite_bytes(&mut rom0, 0x150, &tpp1_rev, "TPP1 revision number");
+        overwrite_bytes(&mut rom0[..], 0x150, &tpp1_rev, "TPP1 revision number");
 
         if let Some(ram_size) = ram_size {
             overwrite_byte(&mut rom0, 0x152, ram_size, "RAM size");
@@ -696,7 +744,7 @@ fn process_file(input: &mut File, output: &mut File, name: &str, file_size: u64,
 
     if let Some(old_licensee) = options.old_licensee {
         overwrite_byte(&mut rom0, 0x14B, old_licensee, "old licensee code");
-    } else if sgb && rom0[0x14B] != 0x33 {
+    } else if options.sgb && rom0[0x14B] != 0x33 {
         eprintln!("warning: SGB compatibility enabled, but old licensee was 0x{:02x}, not 0x33", rom0[0x14B]);
     }
     
