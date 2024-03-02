@@ -13,7 +13,7 @@ categories = ["command-line-utilities", "development-tools::debugging", "game-de
 # TODO: move bin-only deps to separate features.
 [dependencies] # TODO: audit deps & features
 codespan-reporting = "0.11.1"
-clap = "3.0.0-beta.5"
+clap = { version = "3.1.6", features = ["derive"] }
 keyword-trie-gen = { path = "keyword-trie-gen" }
 lalrpop-util = "0.19.8"
 memmap2 = "0.5.8"

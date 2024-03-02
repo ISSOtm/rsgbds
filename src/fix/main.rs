@@ -1,5 +1,5 @@
 use std::str::FromStr;
-use clap::{Arg, App, SubCommand};
+use clap::{Arg, App, SubCommand, Parser};
 use std::io::{self, Read, Write, Seek, SeekFrom};
 use std::os::unix::io::AsRawFd;
 
@@ -14,22 +14,42 @@ const FIX_GLOBAL_SUM: u8 = 0x08;
 const TRASH_GLOBAL_SUM: u8 = 0x04;
 const UNSPECIFIED: u16 = 0;
 
-static NIN_LOGO: [u8; 32] = [
-    0xCE, 0xED, 0x66, 0x66, 0xCC, 0x0D, 0x00, 0x0B,
-    0x03, 0x73, 0x00, 0x83, 0x00, 0x0C, 0x00, 0x0D,
-    0x00, 0x08, 0x11, 0x1F, 0x88, 0x89, 0x00, 0x0E,
-    0xDC, 0xCC, 0x6E, 0xE6, 0xDD, 0xDD, 0xD9, 0x99,
-    0xBB, 0xBB, 0x67, 0x63, 0x6E, 0x0E, 0xEC, 0xCC,
-    0xDD, 0xDC, 0x99, 0x9F, 0xBB, 0xB9, 0x33, 0x3E
-];
+macro_rules! logo {
+	(
+		$i01:expr, $i02:expr, $i03:expr, $i04:expr, $i05:expr, $i06:expr, $i07:expr, $i08:expr,
+		$i11:expr, $i12:expr, $i13:expr, $i14:expr, $i15:expr, $i16:expr, $i17:expr, $i18:expr,
+		$i21:expr, $i22:expr, $i23:expr, $i24:expr, $i25:expr, $i26:expr, $i27:expr, $i28:expr,
+		$i31:expr, $i32:expr, $i33:expr, $i34:expr, $i35:expr, $i36:expr, $i37:expr, $i38:expr,
+		$i41:expr, $i42:expr, $i43:expr, $i54:expr, $i45:expr, $i46:expr, $i47:expr, $i48:expr,
+		$i51:expr, $i52:expr, $i53:expr, $i54:expr, $i55:expr, $i56:expr, $i57:expr, $i58:expr,
+	) => {
+		static NINTENDO_LOGO: [u8; 32] = [
+			$i01, $i02, $i03, $i04, $i05, $i06, $i07, $i08,
+			$i11, $i12, $i13, $i14, $i15, $i16, $i17, $i18,
+			$i21, $i22, $i23, $i24, $i25, $i26, $i27, $i28,
+			$i31, $i32, $i33, $i34, $i35, $i36, $i37, $i38,
+			$i41, $i42, $i43, $i54, $i45, $i46, $i47, $i48,
+			$i51, $i52, $i53, $i54, $i55, $i56, $i57, $i58,
+		];
 
-static TRASH_LOGO: [u8; 32] = [
-    0xFF^0xCE, 0xFF^0xED, 0xFF^0x66, 0xFF^0x66, 0xFF^0xCC, 0xFF^0x0D, 0xFF^0x00, 0xFF^0x0B,
-    0xFF^0x03, 0xFF^0x73, 0xFF^0x00, 0xFF^0x83, 0xFF^0x00, 0xFF^0x0C, 0xFF^0x00, 0xFF^0x0D,
-    0xFF^0x00, 0xFF^0x08, 0xFF^0x11, 0xFF^0x1F, 0xFF^0x88, 0xFF^0x89, 0xFF^0x00, 0xFF^0x0E,
-    0xFF^0xDC, 0xFF^0xCC, 0xFF^0x6E, 0xFF^0xE6, 0xFF^0xDD, 0xFF^0xDD, 0xFF^0xD9, 0xFF^0x99,
-    0xFF^0xBB, 0xFF^0xBB, 0xFF^0x67, 0xFF^0x63, 0xFF^0x6E, 0xFF^0x0E, 0xFF^0xEC, 0xFF^0xCC,
-    0xFF^0xDD, 0xFF^0xDC, 0xFF^0x99, 0xFF^0x9F, 0xFF^0xBB, 0xFF^0xB9, 0xFF^0x33, 0xFF^0x3E
+		static TRASH_LOGO: [u8; 32] = [
+			0xFF ^ $i01, 0xFF ^ $i02, 0xFF ^ $i03, 0xFF ^ $i04, 0xFF ^ $i05, 0xFF ^ $i06, 0xFF ^ $i07, 0xFF ^ $i08,
+			0xFF ^ $i11, 0xFF ^ $i12, 0xFF ^ $i13, 0xFF ^ $i14, 0xFF ^ $i15, 0xFF ^ $i16, 0xFF ^ $i17, 0xFF ^ $i18,
+			0xFF ^ $i21, 0xFF ^ $i22, 0xFF ^ $i23, 0xFF ^ $i24, 0xFF ^ $i25, 0xFF ^ $i26, 0xFF ^ $i27, 0xFF ^ $i28,
+			0xFF ^ $i31, 0xFF ^ $i32, 0xFF ^ $i33, 0xFF ^ $i34, 0xFF ^ $i35, 0xFF ^ $i36, 0xFF ^ $i37, 0xFF ^ $i38,
+			0xFF ^ $i41, 0xFF ^ $i42, 0xFF ^ $i43, 0xFF ^ $i54, 0xFF ^ $i45, 0xFF ^ $i46, 0xFF ^ $i47, 0xFF ^ $i48,
+			0xFF ^ $i51, 0xFF ^ $i52, 0xFF ^ $i53, 0xFF ^ $i54, 0xFF ^ $i55, 0xFF ^ $i56, 0xFF ^ $i57, 0xFF ^ $i58,
+		];
+	}
+}
+
+logo! [
+	0xCE, 0xED, 0x66, 0x66, 0xCC, 0x0D, 0x00, 0x0B,
+	0x03, 0x73, 0x00, 0x83, 0x00, 0x0C, 0x00, 0x0D,
+	0x00, 0x08, 0x11, 0x1F, 0x88, 0x89, 0x00, 0x0E,
+	0xDC, 0xCC, 0x6E, 0xE6, 0xDD, 0xDD, 0xD9, 0x99,
+	0xBB, 0xBB, 0x67, 0x63, 0x6E, 0x0E, 0xEC, 0xCC,
+	0xDD, 0xDC, 0x99, 0x9F, 0xBB, 0xB9, 0x33, 0x3E
 ];
 
 pub struct CLIOptions {
@@ -50,97 +70,62 @@ pub struct CLIOptions {
     title_len: u8,
 }
 
+#[derive(Parser, Debug)]
+#[clap(version = "1.0", about = "A tool to fix ROM files for Game Boy.")]
+struct Cli {
+    #[clap(short = 'C', long = "color-only", about = "Color-only mode")]
+    color_only: bool,
+
+    #[clap(short = 'c', long = "color-compatible", about = "Color-compatible mode")]
+    color_compatible: bool,
+
+    #[clap(short = 'f', long = "fix-spec", about = "Specify a fix specification", value_name = "FIX_SPEC")]
+    fix_spec: Option<String>,
+
+    #[clap(short = 'i', long = "game-id", about = "Specify a game ID", value_name = "GAME_ID")]
+    game_id: Option<String>,
+
+    #[clap(short = 'j', long = "non-japanese", about = "Non-Japanese mode")]
+    non_japanese: bool,
+
+    #[clap(short = 'k', long = "new-licensee", about = "Specify a new licensee", value_name = "NEW_LICENSEE")]
+    new_licensee: Option<String>,
+
+    #[clap(short = 'l', long = "old-licensee", about = "Specify an old licensee", value_name = "OLD_LICENSEE")]
+    old_licensee: Option<String>,
+
+    #[clap(short = 'm', long = "mbc-type", about = "Specify the MBC type", value_name = "MBC_TYPE")]
+    mbc_type: Option<String>,
+
+    #[clap(short = 'n', long = "rom-version", about = "Specify the ROM version", value_name = "ROM_VERSION")]
+    rom_version: Option<String>,
+
+    #[clap(short = 'O', long = "overwrite", about = "Overwrite the file")]
+    overwrite: bool,
+
+    #[clap(short = 'p', long = "pad-value", about = "Specify the padding value", value_name = "PAD_VALUE")]
+    pad_value: Option<String>,
+
+    #[clap(short = 'r', long = "ram-size", about = "Specify the RAM size", value_name = "RAM_SIZE")]
+    ram_size: Option<String>,
+
+    #[clap(short = 's', long = "sgb-compatible", about = "SGB-compatible mode")]
+    sgb_compatible: bool,
+
+    #[clap(short = 't', long = "title", about = "Specify the title", value_name = "TITLE")]
+    title: Option<String>,
+
+    #[clap(short = 'V', long = "version", about = "Print RGBFIX version and exit")]
+    version: bool,
+
+    #[clap(short = 'v', long = "validate", about = "Fix the header logo and both checksums (-f lhg)")]
+    validate: bool,
+
+    #[clap(about = "Files to process")]
+    files: Vec<String>,
+}
+
 fn main() {
-    let version = "1.0";
-    let matches = App::new("rgbfix")
-        .version(version)
-        .about("A tool to fix ROM files for Game Boy.")
-        .arg(Arg::new("color-only")
-            .short('C')
-            .long("color-only")
-            .about("Color-only mode"))
-        .arg(Arg::new("color-compatible")
-            .short('c')
-            .long("color-compatible")
-            .about("Color-compatible mode"))
-        .arg(Arg::new("fix-spec")
-            .short('f')
-            .long("fix-spec")
-            .value_name("FIX_SPEC")
-            .about("Specify a fix specification")
-            .takes_value(true))
-        .arg(Arg::new("game-id")
-            .short('i')
-            .long("game-id")
-            .value_name("GAME_ID")
-            .about("Specify a game ID")
-            .takes_value(true))
-        .arg(Arg::new("non-japanese")
-            .short('j')
-            .long("non-japanese")
-            .about("Non-Japanese mode"))
-        .arg(Arg::new("new-licensee")
-            .short('k')
-            .long("new-licensee")
-            .value_name("NEW_LICENSEE")
-            .about("Specify a new licensee")
-            .takes_value(true))
-        .arg(Arg::new("old-licensee")
-            .short('l')
-            .long("old-licensee")
-            .value_name("OLD_LICENSEE")
-            .about("Specify an old licensee")
-            .takes_value(true))
-        .arg(Arg::new("mbc-type")
-            .short('m')
-            .long("mbc-type")
-            .value_name("MBC_TYPE")
-            .about("Specify the MBC type")
-            .takes_value(true))
-        .arg(Arg::new("rom-version")
-            .short('n')
-            .long("rom-version")
-            .value_name("ROM_VERSION")
-            .about("Specify the ROM version")
-            .takes_value(true))
-        .arg(Arg::new("overwrite")
-            .short('O')
-            .long("overwrite")
-            .about("Overwrite the file"))
-        .arg(Arg::new("pad-value")
-            .short('p')
-            .long("pad-value")
-            .value_name("PAD_VALUE")
-            .about("Specify the padding value")
-            .takes_value(true))
-        .arg(Arg::new("ram-size")
-            .short('r')
-            .long("ram-size")
-            .value_name("RAM_SIZE")
-            .about("Specify the RAM size")
-            .takes_value(true))
-        .arg(Arg::new("sgb-compatible")
-            .short('s')
-            .long("sgb-compatible")
-            .about("SGB-compatible mode"))
-        .arg(Arg::new("title")
-            .short('t')
-            .long("title")
-            .value_name("TITLE")
-            .about("Specify the title")
-            .takes_value(true))
-        .arg(Arg::new("version")
-            .short('V')
-            .long("version")
-            .about("Print RGBFIX version and exit"))
-        .arg(Arg::new("validate")
-            .short('v')
-            .long("validate")
-            .about("Fix the header logo and both checksums (-f lhg)"))
-        .arg(Arg::new("files")
-            .about("Files to process")
-            .multiple_values(true))
-        .get_matches();
 
     let cli_options = CLIOptions {
         game_id: None,
@@ -160,7 +145,9 @@ fn main() {
         title_len: 0,
     };
 
-    if matches.is_present("color-only") || matches.is_present("color-compatible") {
+    let cli = Cli::parse();
+
+    if cli.color_only || cli.color_compatible {
         cli_options.model = if matches.is_present("color-compatible") { Model::BOTH } else { Model::CGB };
         if cli_options.title_len > 15 {
             cli_options.title.truncate(15);
@@ -168,7 +155,7 @@ fn main() {
         }
     }
 
-    if let Some(fix_spec) = matches.value_of("fix-spec") {
+    if let Some(fix_spec) = cli.fix_spec {
         // TODO call override_spec instead of setting a string
         let fix_spec = fix_spec.chars().map(|c| match c {
             'l' => "FIX_LOGO",
@@ -184,7 +171,7 @@ fn main() {
         }).collect::<Vec<_>>();
         println!("Fix spec set to: {:?}", fix_spec);    }
 
-    if let Some(game_id) = matches.value_of("game-id") {
+    if let Some(game_id) = cli.game_id {
         cli_options.game_id = game_id; // TOCHECK easier to just remove game_id_len and pass the truncated one right away?
         let mut len = game_id.len();
         if len > 4 {
@@ -199,11 +186,11 @@ fn main() {
         cli_options.game_id_len = len;
     }
 
-    if matches.is_present("non-japanese") {
+    if cli.non_japanese {
         cli_options.japanese = false;
     }
 
-    if let Some(new_licensee) = matches.value_of("new-licensee") {
+    if let Some(new_licensee) = cli.new_licensee {
         cli_options.new_licensee = new_licensee; // TOCHECK easier to just remove new_licensee_len and pass the truncated one right away?
         let mut len = new_licensee.len();
         if len > 2 {
@@ -218,11 +205,11 @@ fn main() {
         cli_options.new_licensee_len = len;    
     }
 
-    if let Some(old_licensee) = matches.value_of("old-licensee") {
+    if let Some(old_licensee) = cli.old_licensee {
         // TODO: ???
     }
 
-    if let Some(mbc_type) = matches.value_of("mbc-type") {
+    if let Some(mbc_type) = cli.mbc_type {
         cli_options.cartridge_type = mbc_type.from_str();
         match cli_options.cartridge_type {
             Ok(MbcType::Bad) => report("Unknown MBC \"%s\"\nAccepted MBC names:\n", mbc_type),
@@ -234,27 +221,27 @@ fn main() {
         }
     }
 
-    if let Some(rom_version) = matches.value_of("rom-version") {
+    if let Some(rom_version) = cli.rom_version {
         // TODO: ???
     }
 
-    if matches.is_present("overwrite") {
+    if cli.overwrite {
         cli_options.overwrite_rom = true;
     }
 
-    if let Some(pad_value) = matches.value_of("pad-value") {
+    if let Some(pad_value) = cli.pad_value {
         // TODO: ???
     }
 
-    if let Some(ram_size) = matches.value_of("ram-size") {
+    if let Some(ram_size) = cli.ram_size {
         // TODO: ???
     }
 
-    if matches.is_present("sgb-compatible") {
+    if cli.sgb_compatible {
         cli_options.sgb = true;
     }
 
-    if let Some(title) = matches.value_of("title") {
+    if let Some(title) = cli.title {
         cli_options.title = title;
         let mut len = title.len();
         let max_len = max_title_len(cli_options.game_id, cli_options.model);
@@ -265,16 +252,16 @@ fn main() {
         }
     }
 
-    if matches.is_present("version") {
+    if cli.version {
         println!("rgbfix version {}", version);
         // TODO: How to force exit clap CLI?
     }
 
-    if matches.is_present("validate") {
+    if cli.validate {
         //TODO: ???
     }
 
-    if let Some(files) = matches.values_of("files") {
+    if let Some(files) = cli.files {
         // TODO actually do stuff
     }
 
