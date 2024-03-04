@@ -534,7 +534,35 @@ fn get_mbc_name(mbc_type: MbcType) -> &'static str {
     }
 }
 
-fn mbc_has_ram(mbc_type: MbcType) -> Option<bool> {
+fn is_tpp1_type(mbc_type: &MbcType) -> bool {
+    match mbc_type {
+        MbcType::Tpp1Rumble |
+        MbcType::Tpp1MultiRumble |
+        MbcType::Tpp1MultiRumbleRumble |
+        MbcType::Tpp1Timer |
+        MbcType::Tpp1TimerRumble |
+        MbcType::Tpp1TimerMultiRumble |
+        MbcType::Tpp1TimerMultiRumbleRumble |
+        MbcType::Tpp1Battery |
+        MbcType::Tpp1BatteryRumble |
+        MbcType::Tpp1BatteryMultiRumble |
+        MbcType::Tpp1BatteryMultiRumbleRumble |
+        MbcType::Tpp1BatteryTimer |
+        MbcType::Tpp1BatteryTimerRumble |
+        MbcType::Tpp1BatteryTimerMultiRumble |
+        MbcType::Tpp1BatteryTimerMultiRumbleRumble => true,
+        _ => false,
+    }
+}
+
+fn mbc_is_erroneous(mbc_type: &MbcType) -> bool {
+    match mbc_type {
+        MbcType::MbcNone | MbcType::MbcBad | MbcType::MbcWrongFeatures | MbcType::MbcBadRange => true,
+        _ => false
+    }
+}
+
+fn mbc_has_ram(mbc_type: &MbcType) -> Option<bool> {
     match mbc_type {
         MbcType::Rom
         | MbcType::Mbc1
@@ -687,7 +715,7 @@ fn process_file(input: &mut File, output: &mut File, name: &str, file_size: u64,
         Ok(corr_len) => corr_len,
         Err(e) => { eprintln!("Invalid file input."); 0 }// TOCHECK: Crash instead of default 0 value
     };
-    let header_size = if get_mbc_type_code(&options.cartridge_type) & 0xFF00 == get_mbc_type_code(&MbcType::Tpp1) { 0x154 } else { 0x150 };
+    let header_size = if is_tpp1_type(&options.cartridge_type) { 0x154 } else { 0x150 };
 
     if rom0_len < header_size as usize {
         eprintln!("FATAL: \"{}\" too short, expected at least {} bytes, got only {}",
@@ -732,12 +760,12 @@ fn process_file(input: &mut File, output: &mut File, name: &str, file_size: u64,
     let cartridge_type = options.cartridge_type;
     let ram_size = options.ram_size;
 
-    if get_mbc_type_code(&cartridge_type) < get_mbc_type_code(&MbcType::MbcNone) {
-        let byte = cartridge_type as u8;
+    if !mbc_is_erroneous(&cartridge_type) {
+        let mut byte = cartridge_type as u8;
 
-        if (get_mbc_type_code(&cartridge_type) & get_mbc_type_code(&MbcType::Tpp1)) == get_mbc_type_code(&MbcType::Tpp1) {
+        if is_tpp1_type(&cartridge_type) {
             // Cartridge type isn't directly actionable, translate it
-            let byte = 0xBC;
+            byte = 0xBC;
             // The other TPP1 identification bytes will be written below
         }
         overwrite_byte(&mut rom0[..], 0x147, byte, "cartridge type", options.overwrite_rom);
@@ -745,7 +773,7 @@ fn process_file(input: &mut File, output: &mut File, name: &str, file_size: u64,
 
     // ROM size will be written last, after evaluating the file's size
 
-    if (get_mbc_type_code(&cartridge_type) & get_mbc_type_code(&MbcType::Tpp1)) == get_mbc_type_code(&MbcType::Tpp1) {
+    if is_tpp1_type(&cartridge_type) {
         let tpp1_code = vec![0xC1, 0x65];
         let tpp1_rev = vec![0xC1, 0x65]; // TODO WARNING PLACEHOLDER NOT ACTUAL VALUES, PICK UP FROM OPTIONS INSTEAD?
 
