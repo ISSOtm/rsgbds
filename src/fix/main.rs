@@ -3,6 +3,7 @@
 use std::str::FromStr;
 use clap::{Arg, App, SubCommand, Parser};
 use std::io::{self, Read, Write, Seek, SeekFrom};
+use std::os::unix::fs::FileExt; // For lseek
 use std::os::unix::io::AsRawFd;
 use std::mem::size_of_val;
 use std::fs::File;
@@ -263,7 +264,7 @@ fn main() {
     }
 
     if let Some(rom_version) = cli.rom_version {
-        // TODO: ???
+        // TODO: ??? Looks like parseByte gets undefined at the bottom of the C++ file, worth investigating...
     }
 
     if cli.overwrite {
@@ -808,6 +809,191 @@ fn process_file(input: &mut File, output: &mut File, name: &str, file_size: u64,
     if let Some(rom_version) = options.rom_version {
         overwrite_byte(&mut rom0[..], 0x14C, rom_version as u8, "mask ROM version number", options.overwrite_rom);
     }
+
+    let mut romx: Vec<u8> = Vec::new(); // Buffer of ROMX bank data
+    let mut nb_banks: u32 = 1; // Number of banks *targeted*, including ROM0
+    let mut total_romx_len: usize = 0; // *Actual* size of ROMX data
+    let mut bank: [u8; BANK_SIZE] = [0; BANK_SIZE]; // Temp buffer used to store a whole bank's worth of data
+    let mut global_sum: u16 = 0; // Global checksum variable
+
+    // Handle ROMX
+    if input == output {
+        if file_size >= 0x10000 * BANK_SIZE {
+            eprintln!("FATAL: \"{}\" has more than 65536 banks", name);
+            return;
+        }
+        // This should be guaranteed from the size cap...
+        // Rust doesn't have static_assert in the same way C++ does, but we can use compile-time checks with const assertions
+        // TOCHECK: This assert will probably never catch anything anyhow, so delete if it causes problems
+        const _: () = assert!(0x10000 * BANK_SIZE <= std::mem::size_of::<usize>());
+        // Compute number of banks and ROMX len from file size
+        nb_banks = (file_size + (BANK_SIZE - 1)) / BANK_SIZE;
+        total_romx_len = if file_size >= BANK_SIZE { file_size - BANK_SIZE } else { 0 };
+    } else if rom0_len == BANK_SIZE {
+        // Copy ROMX when reading a pipe, and we're not at EOF yet
+        loop {
+            romx.resize(nb_banks * BANK_SIZE, 0); // Initialize new elements to 0
+            let bank_len = read_bytes(input, &mut romx[(nb_banks - 1) * BANK_SIZE..], BANK_SIZE);
+
+            // Update bank count, ONLY IF at least one byte was read
+            if bank_len > 0 {
+                // We're gonna read another bank, check that it won't be too much
+                // TOCHECK: same thing as the previous one
+                const _: () = assert!(0x10000 * BANK_SIZE <= std::mem::size_of::<usize>());
+                if nb_banks == 0x10000 {
+                    eprintln!("FATAL: \"{}\" has more than 65536 banks", name);
+                    return;
+                }
+                nb_banks += 1;
+
+                // Update global checksum, too
+                for i in 0..bank_len {
+                    global_sum += romx[total_romx_len + i] as u16;
+                }
+                total_romx_len += bank_len;
+            }
+            // Stop when an incomplete bank has been read
+            if bank_len != BANK_SIZE {
+                break;
+            }
+
+            //TOCHECK: Should this loop have an emergency anti-infinite loop exit condition?
+        }
+    }
+
+    if let Some(pad_value) = options.pad_value {
+        // We want at least 2 banks
+        if nb_banks == 1 {
+            if rom0_len != rom0.len() {
+                // Fill the remaining space in rom0 with padValue
+                for i in rom0_len..rom0.len() {
+                    rom0[i] = padValue;
+                }
+                // Update rom0Len to reflect the full size of rom0
+                rom0_len = rom0.len();
+            }
+            nb_banks = 2;
+        } else {
+            assert_eq!(rom0_len, rom0.len(), "rom0Len must equal the size of rom0");
+        }
+        assert!(nb_banks >= 2, "Number of banks must be at least 2");
+        // Alter number of banks to reflect required value
+        // x&(x-1) is zero iff x is a power of 2, or 0; we know for sure it's non-zero,
+        // so this is true (non-zero) when we don't have a power of 2
+        if !nb_banks.is_power_of_two() {
+            nb_banks = nb_banks.next_power_of_two();
+        }        
+        // Write final ROM size
+        rom0[0x148] = (nb_banks / 2).trailing_zeros() as u8;
+        // Alter global checksum based on how many bytes will be added (not counting ROM0)
+        global_sum += padValue * ((nb_banks - 1) * BANK_SIZE - total_romx_len);
+    }
+
+    // Handle the header checksum after the ROM size has been written
+    if options.fix_spec.contains(FixSpec::FixHeaderSum) || options.fix_spec.contains(FixSpec::TrashHeaderSum){
+        let mut sum: u8 = 0;
+
+        for i in 0x134..0x14D {
+            sum -= rom0[i] + 1;
+        }
+
+        overwrite_byte(rom0, 0x14D, if fix_spec.contains(FixSpec::TrashHeaderSum) { !sum } else { sum }, "header checksum", options.overwrite_rom);
+    }
+
+    if options.fix_spec.contains(FixSpec::FixGlobalSum) || options.fix_spec.contains(FixSpec::TrashGlobalSum){
+        assert!(rom0_len >= 0x14E, "ROM0 length must be at least 0x14E");
+        for i in 0..0x14E {
+            global_sum += rom0[i] as u16;
+        }
+        for i in 0x150..rom0_len {
+            global_sum += rom0[i] as u16;
+        }
+        // Pipes have already read ROMX and updated globalSum, but not regular files
+        if input == output {
+            loop {
+                let bank_len = read_bytes(input, &mut bank);
+
+                for i in 0..bank_len {
+                    global_sum += bank[i] as u16;
+                }
+                if bank_len != BANK_SIZE {
+                    break;
+                }
+            }
+            //TOCHECK: another loop to potentially add exit condition if infinite loop?
+        }
+
+        if fix_spec.contains(FixSpec::TrashGlobalSum) {
+            global_sum = !global_sum;
+        }
+
+        let bytes = global_sum.to_be_bytes();
+
+        overwrite_bytes(rom0, 0x14E, &bytes, "global checksum", options.overwrite_rom);
+    }
+
+    let mut write_len: isize;
+
+    // In case the output depends on the input, reset to the beginning of the file, and only
+    // write the header
+    if input == output {
+        if let Err(e) = output.seek(io::SeekFrom::Start(0)) {
+            eprintln!("FATAL: Failed to rewind \"{}\": {}", name, e);
+            return;
+        }
+        // If modifying the file in-place, we only need to edit the header
+        // However, padding may have modified ROM0 (added padding), so don't in that case
+        if options.pad_value.is_some() {
+            rom0_len = header_size;
+        }
+    }
+    write_len = write_bytes(&mut output, &rom0[..rom0_len])?; //TODO actually make this function exist. Trying out ? concise error handling, let's see if it works
+
+    if write_len == -1 {
+        eprintln!("FATAL: Failed to write \"{}\"'s ROM0: {}", name, io::Error::last_os_error());
+        return;
+    } else if write_len as usize < rom0_len {
+        eprintln!("FATAL: Could only write {} of \"{}\"'s {} ROM0 bytes",
+            write_len, name, rom0_len);
+        return;
+    }
+
+    // Output ROMX if it was buffered
+    if !romx.is_empty() {
+        write_len = write_bytes(&mut output, &romx[..total_romx_len])?;
+        if write_len == -1 {
+            eprintln!("FATAL: Failed to write \"{}\"'s ROMX: {}", name, io::Error::last_os_error());
+            return;
+        } else if write_len as usize < total_romx_len {
+            eprintln!("FATAL: Could only write {} of \"{}\"'s {} ROMX bytes",
+                write_len, name, total_romx_len);
+            return;
+        }
+    }
+
+    // Output padding
+    if options.pad_value.is_some() {
+        if input == output {
+            if let Err(e) = output.seek(io::SeekFrom::End(0)) {
+                eprintln!("FATAL: Failed to seek to end of \"{}\": {}", name, e);
+                return;
+            }
+        }
+        bank.fill(pad_value);
+        let len = (nb_banks - 1) * BANK_SIZE - total_romx_len; // Don't count ROM0!
+
+        while len > 0 {
+            let this_len = if len > BANK_SIZE { BANK_SIZE } else { len };
+            write_len = write_bytes(&mut output, &bank[..this_len])?;
+
+            if write_len as usize != this_len {
+                report("FATAL: Failed to write \"{}\"'s padding: {}", name, io::Error::last_os_error());
+                break;
+            }
+            len -= this_len;
+        }
+    }
+
     
     Ok(())
 }
