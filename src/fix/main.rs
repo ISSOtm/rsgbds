@@ -6,7 +6,7 @@ use std::io::{self, Read, Write, Seek, SeekFrom};
 use std::os::unix::fs::FileExt; // For lseek
 use std::os::unix::io::AsRawFd;
 use std::mem::size_of_val;
-use std::fs::File;
+use std::fs::{File, OpenOptions};
 
 const BANK_SIZE: usize = 0x4000;
 const OPTSTRING: &str = "Ccf:i:jk:l:m:n:Op:r:st:Vv";
@@ -87,6 +87,7 @@ struct Cli {
     files: Vec<String>,
 }
 
+#[derive(Debug, PartialEq)]
 enum FixSpec {
     FixLogo,
     TrashLogo,
@@ -315,7 +316,7 @@ fn main() {
     }
 
     if !cli.files.is_empty() {
-        // TODO actually do stuff
+        process_filename(&cli.files[0], cli_options); // TOCHECK [0] is dubious, are multiple files getting fixed in one CLI call possible?
     }
 
 }
@@ -847,22 +848,22 @@ fn process_file(input: &mut File, output: &mut File, name: &str, file_size: u64,
 
     // Handle ROMX
     if input == output {
-        if file_size >= 0x10000 * BANK_SIZE {
+        if file_size >= (0x10000 * BANK_SIZE) as u64 {
             eprintln!("FATAL: \"{}\" has more than 65536 banks", name);
-            return;
+            return Ok(());
         }
         // This should be guaranteed from the size cap...
         // Rust doesn't have static_assert in the same way C++ does, but we can use compile-time checks with const assertions
         // TOCHECK: This assert will probably never catch anything anyhow, so delete if it causes problems
         const _: () = assert!(0x10000 * BANK_SIZE <= std::mem::size_of::<usize>());
         // Compute number of banks and ROMX len from file size
-        nb_banks = (file_size + (BANK_SIZE - 1)) / BANK_SIZE;
-        total_romx_len = if file_size >= BANK_SIZE { file_size - BANK_SIZE } else { 0 };
+        nb_banks = ((file_size + (BANK_SIZE - 1) as u64) / BANK_SIZE as u64) as u32;
+        total_romx_len = if file_size >= BANK_SIZE as u64 { (file_size - BANK_SIZE as u64) as usize } else { 0 };
     } else if rom0_len == BANK_SIZE {
         // Copy ROMX when reading a pipe, and we're not at EOF yet
         loop {
-            romx.resize(nb_banks * BANK_SIZE, 0); // Initialize new elements to 0
-            let bank_len = read_bytes(input, &mut romx[(nb_banks - 1) * BANK_SIZE..], BANK_SIZE);
+            romx.resize((nb_banks * BANK_SIZE as u32) as usize, 0); // Initialize new elements to 0
+            let bank_len = read_bytes(input, &mut romx[(nb_banks - 1) * BANK_SIZE as u32..])?;
 
             // Update bank count, ONLY IF at least one byte was read
             if bank_len > 0 {
@@ -871,7 +872,7 @@ fn process_file(input: &mut File, output: &mut File, name: &str, file_size: u64,
                 const _: () = assert!(0x10000 * BANK_SIZE <= std::mem::size_of::<usize>());
                 if nb_banks == 0x10000 {
                     eprintln!("FATAL: \"{}\" has more than 65536 banks", name);
-                    return;
+                    return Ok(());
                 }
                 nb_banks += 1;
 
@@ -894,7 +895,7 @@ fn process_file(input: &mut File, output: &mut File, name: &str, file_size: u64,
             if rom0_len != rom0.len() {
                 // Fill the remaining space in rom0 with padValue
                 for i in rom0_len..rom0.len() {
-                    rom0[i] = padValue;
+                    rom0[i] = pad_value as u8;
                 }
                 // Update rom0Len to reflect the full size of rom0
                 rom0_len = rom0.len();
@@ -913,21 +914,21 @@ fn process_file(input: &mut File, output: &mut File, name: &str, file_size: u64,
         // Write final ROM size
         rom0[0x148] = (nb_banks / 2).trailing_zeros() as u8;
         // Alter global checksum based on how many bytes will be added (not counting ROM0)
-        global_sum += padValue * ((nb_banks - 1) * BANK_SIZE - total_romx_len);
+        global_sum += pad_value * ((nb_banks - 1) * BANK_SIZE as u32 - total_romx_len as u32) as u16;
     }
 
     // Handle the header checksum after the ROM size has been written
-    if options.fix_spec.contains(FixSpec::FixHeaderSum) || options.fix_spec.contains(FixSpec::TrashHeaderSum){
+    if options.fix_spec.contains(&FixSpec::FixHeaderSum) || options.fix_spec.contains(&FixSpec::TrashHeaderSum){
         let mut sum: u8 = 0;
 
         for i in 0x134..0x14D {
             sum -= rom0[i] + 1;
         }
 
-        overwrite_byte(rom0, 0x14D, if fix_spec.contains(FixSpec::TrashHeaderSum) { !sum } else { sum }, "header checksum", options.overwrite_rom);
+        overwrite_byte(&mut rom0, 0x14D, if options.fix_spec.contains(&FixSpec::TrashHeaderSum) { !sum } else { sum }, "header checksum", options.overwrite_rom);
     }
 
-    if options.fix_spec.contains(FixSpec::FixGlobalSum) || options.fix_spec.contains(FixSpec::TrashGlobalSum){
+    if options.fix_spec.contains(&FixSpec::FixGlobalSum) || options.fix_spec.contains(&FixSpec::TrashGlobalSum){
         assert!(rom0_len >= 0x14E, "ROM0 length must be at least 0x14E");
         for i in 0..0x14E {
             global_sum += rom0[i] as u16;
@@ -938,7 +939,7 @@ fn process_file(input: &mut File, output: &mut File, name: &str, file_size: u64,
         // Pipes have already read ROMX and updated globalSum, but not regular files
         if input == output {
             loop {
-                let bank_len = read_bytes(input, &mut bank);
+                let bank_len = read_bytes(input, &mut bank)?;
 
                 for i in 0..bank_len {
                     global_sum += bank[i] as u16;
@@ -949,13 +950,13 @@ fn process_file(input: &mut File, output: &mut File, name: &str, file_size: u64,
             }
         }
 
-        if fix_spec.contains(FixSpec::TrashGlobalSum) {
+        if options.fix_spec.contains(&FixSpec::TrashGlobalSum) {
             global_sum = !global_sum;
         }
 
         let bytes = global_sum.to_be_bytes();
 
-        overwrite_bytes(rom0, 0x14E, &bytes, "global checksum", options.overwrite_rom);
+        overwrite_bytes(&mut rom0, 0x14E, &bytes, "global checksum", options.overwrite_rom);
     }
 
     let mut write_len: isize;
@@ -965,7 +966,7 @@ fn process_file(input: &mut File, output: &mut File, name: &str, file_size: u64,
     if input == output {
         if let Err(e) = output.seek(io::SeekFrom::Start(0)) {
             eprintln!("FATAL: Failed to rewind \"{}\": {}", name, e);
-            return;
+            return Ok(());
         }
         // If modifying the file in-place, we only need to edit the header
         // However, padding may have modified ROM0 (added padding), so don't in that case
@@ -973,27 +974,27 @@ fn process_file(input: &mut File, output: &mut File, name: &str, file_size: u64,
             rom0_len = header_size;
         }
     }
-    write_len = write_bytes(&mut output, &rom0[..rom0_len])?; //TODO actually make this function exist. Trying out ? concise error handling, let's see if it works
+    write_len = write_bytes(output, &rom0[..rom0_len])? as isize;
 
     if write_len == -1 {
         eprintln!("FATAL: Failed to write \"{}\"'s ROM0: {}", name, io::Error::last_os_error());
-        return;
-    } else if write_len as usize < rom0_len {
+        return Ok(());
+    } else if (write_len as usize) < rom0_len {
         eprintln!("FATAL: Could only write {} of \"{}\"'s {} ROM0 bytes",
             write_len, name, rom0_len);
-        return;
+        return Ok(());
     }
 
     // Output ROMX if it was buffered
     if !romx.is_empty() {
-        write_len = write_bytes(&mut output, &romx[..total_romx_len])?;
+        write_len = write_bytes(output, &romx[..total_romx_len])? as isize;
         if write_len == -1 {
             eprintln!("FATAL: Failed to write \"{}\"'s ROMX: {}", name, io::Error::last_os_error());
-            return;
-        } else if write_len as usize < total_romx_len {
+            return Ok(());
+        } else if (write_len as usize) < total_romx_len {
             eprintln!("FATAL: Could only write {} of \"{}\"'s {} ROMX bytes",
                 write_len, name, total_romx_len);
-            return;
+            return Ok(());
         }
     }
 
@@ -1002,21 +1003,21 @@ fn process_file(input: &mut File, output: &mut File, name: &str, file_size: u64,
         if input == output {
             if let Err(e) = output.seek(io::SeekFrom::End(0)) {
                 eprintln!("FATAL: Failed to seek to end of \"{}\": {}", name, e);
-                return;
+                return Ok(());
             }
         }
-        bank.fill(pad_value);
-        let len = (nb_banks - 1) * BANK_SIZE - total_romx_len; // Don't count ROM0!
+        bank.fill(options.pad_value.unwrap() as u8);
+        let len = (nb_banks - 1) * BANK_SIZE as u32 - total_romx_len as u32; // Don't count ROM0!
 
         while len > 0 {
-            let this_len = if len > BANK_SIZE { BANK_SIZE } else { len };
-            write_len = write_bytes(&mut output, &bank[..this_len])?;
+            let this_len = if len > BANK_SIZE as u32 { BANK_SIZE } else { len as usize };
+            write_len = write_bytes(output, &bank[..this_len])? as isize;
 
             if write_len as usize != this_len {
-                report("FATAL: Failed to write \"{}\"'s padding: {}", name, io::Error::last_os_error());
+                eprintln!("FATAL: Failed to write \"{}\"'s padding: {}", name, io::Error::last_os_error());
                 break;
             }
-            len -= this_len;
+            len -= this_len as u32;
         }
     }
 
@@ -1044,7 +1045,7 @@ fn process_filename(name: &str, options: CLIOptions) -> io::Result<bool> {
             eprintln!("FATAL: \"{}\" too short, expected at least 336 ($150) bytes, got only {}", name, metadata.len());
             nb_errors += 1;
         } else {
-            process_file(&file, &file, name, metadata.len() as usize, options)?;
+            process_file(&file, &file, name, metadata.len() as u64, options)?;
         }
     }
 
