@@ -677,6 +677,35 @@ fn read_bytes<R: Read>(fd: &mut R, buf: &mut [u8]) -> io::Result<usize> {
     Ok(total)
 }
 
+fn write_bytes<T: AsRawFd>(fd: &T, buf: &[u8]) -> io::Result<usize> {
+    // POSIX specifies that lengths greater than SSIZE_MAX yield implementation-defined results
+    // In Rust, we don't have a direct equivalent of SSIZE_MAX, but we can use usize::MAX
+    // for the maximum value of usize, which is the size of a pointer on most platforms.
+    assert!(buf.len() <= usize::MAX);
+
+    let mut total = 0;
+
+    while !buf.is_empty() {
+        match fd.as_raw_fd().write(buf) {
+            Ok(ret) => {
+                if ret == 0 {
+                    // EOF reached
+                    return Ok(total);
+                }
+                total += ret;
+                buf = &buf[ret..];
+            },
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => {
+                // Return errors, unless we only were interrupted
+                continue;
+            },
+            Err(e) => return Err(e),
+        }
+    }
+
+    Ok(total)
+}
+
 fn overwrite_byte(rom0: &mut [u8], addr: u16, fixed_byte: u8, area_name: &str, overwrite_rom: bool) {
     let orig_byte = rom0[addr as usize];
 
@@ -856,8 +885,6 @@ fn process_file(input: &mut File, output: &mut File, name: &str, file_size: u64,
             if bank_len != BANK_SIZE {
                 break;
             }
-
-            //TOCHECK: Should this loop have an emergency anti-infinite loop exit condition?
         }
     }
 
@@ -920,7 +947,6 @@ fn process_file(input: &mut File, output: &mut File, name: &str, file_size: u64,
                     break;
                 }
             }
-            //TOCHECK: another loop to potentially add exit condition if infinite loop?
         }
 
         if fix_spec.contains(FixSpec::TrashGlobalSum) {
@@ -996,4 +1022,35 @@ fn process_file(input: &mut File, output: &mut File, name: &str, file_size: u64,
 
     
     Ok(())
+}
+
+fn process_filename(name: &str, options: CLIOptions) -> io::Result<bool> {
+    let mut nb_errors = 0;
+
+    if name == "-" {
+        //TOCHECK: Make SURE only [u8] are used in processing to avoid Windows OS translating newline characters.
+        process_file(io::stdin(), io::stdout(), name, 0, options)?;
+    } else {
+        let mut file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(name)?;
+
+        let metadata = file.metadata()?;
+        if !metadata.is_file() {
+            eprintln!("FATAL: \"{}\" is not a regular file, and thus cannot be modified in-place", name);
+            nb_errors += 1;
+        } else if metadata.len() < 0x150 {
+            eprintln!("FATAL: \"{}\" too short, expected at least 336 ($150) bytes, got only {}", name, metadata.len());
+            nb_errors += 1;
+        } else {
+            process_file(&file, &file, name, metadata.len() as usize, options)?;
+        }
+    }
+
+    if nb_errors > 0 {
+        eprintln!("Fixing \"{}\" failed with {} error{}", name, nb_errors, if nb_errors == 1 { "" } else { "s" });
+    }
+
+    Ok(nb_errors == 0)
 }
