@@ -23,6 +23,7 @@ string-interner = { version = "0.14.0", default-features = false, features = ["s
 take_mut = "0.2.2"
 try-from-discrim = "1.0.0"
 warnings-gen = { path = "warnings-gen" }
+nix = "0.28.0"
 
 [build-dependencies]
 lalrpop = { version = "0.19.8", default-features = false }

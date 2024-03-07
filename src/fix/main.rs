@@ -1,11 +1,9 @@
 //TODO restore cargo.toml bin before shipping
 
 use std::str::FromStr;
-use clap::{Arg, App, SubCommand, Parser};
-use std::io::{self, Read, Write, Seek, SeekFrom};
-use std::os::unix::fs::FileExt; // For lseek
+use clap::Parser;
+use std::io::{self, Read, Write, Seek};
 use std::os::unix::io::AsRawFd;
-use std::mem::size_of_val;
 use std::fs::{File, OpenOptions};
 
 const BANK_SIZE: usize = 0x4000;
@@ -15,10 +13,11 @@ const TRASH_HEADER_SUM: u8 = 0x10;
 const FIX_GLOBAL_SUM: u8 = 0x08;
 const TRASH_GLOBAL_SUM: u8 = 0x04;
 
+#[derive(Debug, Clone)]
 pub struct CLIOptions {
-    game_id: Option<&'static str>,
+    game_id: Option<String>,
     japanese: bool,
-    new_licensee: Option<&'static str>,
+    new_licensee: Option<String>,
     old_licensee: Option<u16>,
     cartridge_type: MbcType,
     rom_version: Option<u16>,
@@ -28,7 +27,7 @@ pub struct CLIOptions {
     sgb: bool,
     fix_spec: Vec<FixSpec>,
     model: Model,
-    title: Option<&'static str>,
+    title: Option<String>,
     title_len: u8,
 }
 
@@ -87,7 +86,7 @@ struct Cli {
     files: Vec<String>,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 enum FixSpec {
     FixLogo,
     TrashLogo,
@@ -185,7 +184,7 @@ fn main() {
         pad_value: None,
         ram_size: None,
         sgb: false,
-        model: Model::DMG,
+        model: Model::Dmg,
         fix_spec: Vec::new(),
         title: None,
         title_len: 0,
@@ -210,34 +209,31 @@ fn main() {
     }
 
     if let Some(mut game_id) = cli.game_id {
-        let mut len = game_id.len();
-        if len > 4 {
+        if game_id.len() > 4 {
             println!("warning: Truncating game ID \"{}\" to 4 chars", &game_id);
             // Truncate game_id to 4 characters if it's longer
-            game_id = game_id[0..4].to_string();
+            game_id.truncate(4);
             println!("Truncated game ID: {}", &game_id);
-            len = 4;
         } else {
             println!("Game ID: {}", &game_id);
         }
-        cli_options.game_id = Some(&game_id); 
-    }
+        cli_options.game_id = Some(game_id);
+    }    
 
     if cli.non_japanese {
         cli_options.japanese = false;
     }
 
     if let Some(mut new_licensee) = cli.new_licensee {
-        let mut len = new_licensee.len() as u8;
+        let len = new_licensee.len() as u8;
         if len > 2 {
-            println!("warning: Truncating new licensee \"{}\" to 2 chars", new_licensee);
+            println!("warning: Truncating new licensee \"{}\" to 2 chars", &new_licensee);
             new_licensee = new_licensee[0..2].to_string();
             println!("Truncated new licencee: {}", &new_licensee[0..2]);
-            len = 2
         } else {
-            println!("New licensee: {}", new_licensee);
+            println!("New licensee: {}", &new_licensee);
         }
-        cli_options.new_licensee = Some(&new_licensee);
+        cli_options.new_licensee = Some(new_licensee);
     }
 
     if let Some(old_licensee) = cli.old_licensee {
@@ -250,7 +246,7 @@ fn main() {
             Ok(mbc_type) => {
                 cli_options.cartridge_type = mbc_type;
             },
-            Err(e) => {
+            Err(_e) => {
                 eprintln!("Error parsing MbcType.");
                 cli_options.cartridge_type = MbcType::MbcBad;
             }
@@ -285,9 +281,9 @@ fn main() {
     }
 
     if let Some(title) = cli.title {
-        cli_options.title = Some(&title);
+        cli_options.title = Some(title.clone());
         let mut len = title.len() as u8;
-        let max_len = max_title_len(cli_options.game_id, cli_options.model);
+        let max_len = max_title_len(&cli_options.game_id, &cli_options.model);
         if len > max_len {
             len = max_len;
             println!("warning: Truncating title \"{}\" to {} chars", title, max_len);
@@ -296,10 +292,10 @@ fn main() {
     }
 
     if cli.color_only || cli.color_compatible {
-        cli_options.model = if cli.color_compatible { Model::BOTH } else { Model::CGB };
+        cli_options.model = if cli.color_compatible { Model::Both } else { Model::Cgb };
         if cli_options.title_len > 15 {
             if let Some(mut title) = cli_options.title {
-                title = &title[0..15];
+                title = title[0..15].to_string();
                 eprintln!("warning: Truncating title \"{}\" to 15 chars", title);
                 cli_options.title = Some(title);
             }
@@ -331,7 +327,7 @@ fn report(fmt: &str, args: &[&str]) -> io::Result<()> {
     Ok(())
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 enum MbcType {
     Rom,
     RomRam,
@@ -383,7 +379,7 @@ enum MbcType {
     MbcBadRange,
 }
 
-fn get_mbc_type_code(mbc_type: &MbcType) -> u8 {
+fn get_mbc_type_code(mbc_type: &MbcType) -> u16 {
     match mbc_type {
         MbcType::Rom => 0x00,
         MbcType::RomRam => 0x08,
@@ -433,7 +429,7 @@ fn get_mbc_type_code(mbc_type: &MbcType) -> u8 {
     }
 }
 
-fn get_mbc_enum(mbc_type: u8) -> MbcType {
+fn get_mbc_enum(mbc_type: u16) -> MbcType {
     match mbc_type {
         0x00 => MbcType::Rom,
         0x08 => MbcType::RomRam,
@@ -558,10 +554,7 @@ fn is_tpp1_type(mbc_type: &MbcType) -> bool {
 }
 
 fn mbc_is_erroneous(mbc_type: &MbcType) -> bool {
-    match mbc_type {
-        MbcType::MbcNone | MbcType::MbcBad | MbcType::MbcWrongFeatures | MbcType::MbcBadRange => true,
-        _ => false
-    }
+    matches!(mbc_type, MbcType::MbcNone | MbcType::MbcBad | MbcType::MbcWrongFeatures | MbcType::MbcBadRange)
 }
 
 fn mbc_has_ram(mbc_type: &MbcType) -> Option<bool> {
@@ -633,9 +626,9 @@ impl FromStr for MbcType {
             return Err(ParseError::Help);
         }
 
-        if s.chars().next().unwrap().is_digit(10) || s.starts_with("$") {
-            let base = if s.starts_with("$") { 16 } else { 10 };
-            let mbc = u8::from_str_radix(&s.trim_start_matches("$"), base).map_err(|_| ParseError::Bad)?;
+        if s.chars().next().unwrap().is_ascii_digit() || s.starts_with('$') {
+            let base = if s.starts_with('$') { 16 } else { 10 };
+            let mbc = u16::from_str_radix(s.trim_start_matches('$'), base).map_err(|_| ParseError::Bad)?;
             if mbc > 0xFF {
                 return Err(ParseError::BadRange);
             }
@@ -646,22 +639,22 @@ impl FromStr for MbcType {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum Model {
-    DMG,
-    BOTH,
-    CGB,
+    Dmg,
+    Both,
+    Cgb,
 }
 
-fn max_title_len(game_id: Option<&str>, model: Model) -> u8 {
-    match (game_id.is_some(), !matches!(model, Model::DMG)) {
+fn max_title_len(game_id: &Option<String>, model: &Model) -> u8 {
+    match (game_id.is_some(), !matches!(model, Model::Dmg)) {
         (true, _) => 11,
         (false, true) => 15,
         _ => 16,
     }
 }
 
-fn read_bytes<R: Read>(fd: &mut R, buf: &mut [u8]) -> io::Result<usize> {
+fn read_bytes<R: Read>(fd: &mut R, mut buf: &mut [u8]) -> io::Result<usize> {
     let mut total = 0;
     while !buf.is_empty() {
         match fd.read(buf) {
@@ -678,29 +671,29 @@ fn read_bytes<R: Read>(fd: &mut R, buf: &mut [u8]) -> io::Result<usize> {
     Ok(total)
 }
 
-fn write_bytes<T: AsRawFd>(fd: &T, buf: &[u8]) -> io::Result<usize> {
-    // POSIX specifies that lengths greater than SSIZE_MAX yield implementation-defined results
-    // In Rust, we don't have a direct equivalent of SSIZE_MAX, but we can use usize::MAX
-    // for the maximum value of usize, which is the size of a pointer on most platforms.
-    assert!(buf.len() <= usize::MAX);
-
+fn write_bytes(file: &mut File, buf: &[u8]) -> io::Result<usize> {
     let mut total = 0;
+    let mut len = buf.len();
 
-    while !buf.is_empty() {
-        match fd.as_raw_fd().write(buf) {
-            Ok(ret) => {
-                if ret == 0 {
-                    // EOF reached
-                    return Ok(total);
-                }
-                total += ret;
-                buf = &buf[ret..];
-            },
-            Err(e) if e.kind() == io::ErrorKind::Interrupted => {
-                // Return errors, unless we only were interrupted
+    while len > 0 {
+        match file.write(&buf[total..]) {
+            Ok(0) => {
+                // EOF reached
+                break;
+            }
+            Ok(n) => {
+                // If anything was written, accumulate it, and continue
+                total += n;
+                len -= n;
+            }
+            Err(ref e) if e.kind() == io::ErrorKind::Interrupted => {
+                // Interrupted, continue
                 continue;
-            },
-            Err(e) => return Err(e),
+            }
+            Err(e) => {
+                // Return errors, unless we only were interrupted
+                return Err(e);
+            }
         }
     }
 
@@ -711,7 +704,7 @@ fn overwrite_byte(rom0: &mut [u8], addr: u16, fixed_byte: u8, area_name: &str, o
     let orig_byte = rom0[addr as usize];
 
     if !overwrite_rom && orig_byte != 0 && orig_byte != fixed_byte {
-        writeln!(std::io::stderr(), "warning: Overwrote a non-zero byte in the {}", area_name).unwrap();
+        eprintln!("warning: Overwrote a non-zero byte in the {}", area_name);
     }
 
     rom0[addr as usize] = fixed_byte;
@@ -742,7 +735,7 @@ fn process_file(input: &mut File, output: &mut File, name: &str, file_size: u64,
     }
 
     let mut rom0 = [0u8; BANK_SIZE];
-    let rom0_len = match read_bytes(input, &mut rom0) {
+    let mut rom0_len = match read_bytes(input, &mut rom0) {
         Ok(corr_len) => corr_len,
         Err(e) => { eprintln!("Invalid file input."); 0 }// TOCHECK: Crash instead of default 0 value
     };
@@ -754,7 +747,7 @@ fn process_file(input: &mut File, output: &mut File, name: &str, file_size: u64,
         return Err(io::Error::new(io::ErrorKind::Other, "File too short"));
     }
 
-    for fix_spec in options.fix_spec {
+    for fix_spec in &options.fix_spec {
         if matches!(fix_spec, FixSpec::FixLogo) || matches!(fix_spec, FixSpec::TrashLogo) {
             match fix_spec {
                 FixSpec::FixLogo => overwrite_bytes(&mut rom0, 0x0104, &NINTENDO_LOGO, "Nintendo logo", options.overwrite_rom),
@@ -772,10 +765,10 @@ fn process_file(input: &mut File, output: &mut File, name: &str, file_size: u64,
         overwrite_bytes(&mut rom0[..], 0x13F, game_id.as_bytes(), "manufacturer code", options.overwrite_rom);
     }
 
-    if !matches!(options.model, Model::DMG) {
+    if !matches!(options.model, Model::Dmg) {
         match options.model {
-            Model::BOTH => overwrite_byte(&mut rom0, 0x143, 0x80, "CGB flag", options.overwrite_rom),
-            Model::CGB => overwrite_byte(&mut rom0, 0x143, 0xC0, "CGB flag", options.overwrite_rom),
+            Model::Both => overwrite_byte(&mut rom0, 0x143, 0x80, "Cgb flag", options.overwrite_rom),
+            Model::Cgb => overwrite_byte(&mut rom0, 0x143, 0xC0, "Cgb flag", options.overwrite_rom),
             _ => (),
         };
     };
@@ -792,7 +785,7 @@ fn process_file(input: &mut File, output: &mut File, name: &str, file_size: u64,
     let ram_size = options.ram_size;
 
     if !mbc_is_erroneous(&cartridge_type) {
-        let mut byte = cartridge_type as u8;
+        let mut byte = cartridge_type.clone() as u8;
 
         if is_tpp1_type(&cartridge_type) {
             // Cartridge type isn't directly actionable, translate it
@@ -847,15 +840,15 @@ fn process_file(input: &mut File, output: &mut File, name: &str, file_size: u64,
     let mut global_sum: u16 = 0; // Global checksum variable
 
     // Handle ROMX
-    if input == output {
+    if input.as_raw_fd() == output.as_raw_fd() {
         if file_size >= (0x10000 * BANK_SIZE) as u64 {
             eprintln!("FATAL: \"{}\" has more than 65536 banks", name);
             return Ok(());
         }
         // This should be guaranteed from the size cap...
         // Rust doesn't have static_assert in the same way C++ does, but we can use compile-time checks with const assertions
-        // TOCHECK: This assert will probably never catch anything anyhow, so delete if it causes problems
-        const _: () = assert!(0x10000 * BANK_SIZE <= std::mem::size_of::<usize>());
+        // TOCHECK: I need this assert explained to me, it always fails
+        // const _: () = assert!(0x10000 * BANK_SIZE <= std::mem::size_of::<usize>());
         // Compute number of banks and ROMX len from file size
         nb_banks = ((file_size + (BANK_SIZE - 1) as u64) / BANK_SIZE as u64) as u32;
         total_romx_len = if file_size >= BANK_SIZE as u64 { (file_size - BANK_SIZE as u64) as usize } else { 0 };
@@ -863,13 +856,13 @@ fn process_file(input: &mut File, output: &mut File, name: &str, file_size: u64,
         // Copy ROMX when reading a pipe, and we're not at EOF yet
         loop {
             romx.resize((nb_banks * BANK_SIZE as u32) as usize, 0); // Initialize new elements to 0
-            let bank_len = read_bytes(input, &mut romx[(nb_banks - 1) * BANK_SIZE as u32..])?;
+            let bank_len = read_bytes(input, &mut romx[((nb_banks - 1) * BANK_SIZE as u32) as usize..])?;
 
             // Update bank count, ONLY IF at least one byte was read
             if bank_len > 0 {
                 // We're gonna read another bank, check that it won't be too much
                 // TOCHECK: same thing as the previous one
-                const _: () = assert!(0x10000 * BANK_SIZE <= std::mem::size_of::<usize>());
+                // const _: () = assert!(0x10000 * BANK_SIZE <= std::mem::size_of::<usize>());
                 if nb_banks == 0x10000 {
                     eprintln!("FATAL: \"{}\" has more than 65536 banks", name);
                     return Ok(());
@@ -937,7 +930,7 @@ fn process_file(input: &mut File, output: &mut File, name: &str, file_size: u64,
             global_sum += rom0[i] as u16;
         }
         // Pipes have already read ROMX and updated globalSum, but not regular files
-        if input == output {
+        if input.as_raw_fd() == output.as_raw_fd() {
             loop {
                 let bank_len = read_bytes(input, &mut bank)?;
 
@@ -963,7 +956,7 @@ fn process_file(input: &mut File, output: &mut File, name: &str, file_size: u64,
 
     // In case the output depends on the input, reset to the beginning of the file, and only
     // write the header
-    if input == output {
+    if input.as_raw_fd() == output.as_raw_fd() {
         if let Err(e) = output.seek(io::SeekFrom::Start(0)) {
             eprintln!("FATAL: Failed to rewind \"{}\": {}", name, e);
             return Ok(());
@@ -1000,14 +993,14 @@ fn process_file(input: &mut File, output: &mut File, name: &str, file_size: u64,
 
     // Output padding
     if options.pad_value.is_some() {
-        if input == output {
+        if input.as_raw_fd() == output.as_raw_fd() {
             if let Err(e) = output.seek(io::SeekFrom::End(0)) {
                 eprintln!("FATAL: Failed to seek to end of \"{}\": {}", name, e);
                 return Ok(());
             }
         }
         bank.fill(options.pad_value.unwrap() as u8);
-        let len = (nb_banks - 1) * BANK_SIZE as u32 - total_romx_len as u32; // Don't count ROM0!
+        let mut len = (nb_banks - 1) * BANK_SIZE as u32 - total_romx_len as u32; // Don't count ROM0!
 
         while len > 0 {
             let this_len = if len > BANK_SIZE as u32 { BANK_SIZE } else { len as usize };
@@ -1027,15 +1020,16 @@ fn process_file(input: &mut File, output: &mut File, name: &str, file_size: u64,
 
 fn process_filename(name: &str, options: CLIOptions) -> io::Result<bool> {
     let mut nb_errors = 0;
-
+    let mut file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(name)?;
+    let mut temp_file = file.try_clone()?; //TODO: This could be plain wrong, check what output file actually does in process_File
     if name == "-" {
         //TOCHECK: Make SURE only [u8] are used in processing to avoid Windows OS translating newline characters.
-        process_file(io::stdin(), io::stdout(), name, 0, options)?;
+        process_file(&mut file, &mut temp_file, name, 0, options)?;
     } else {
-        let mut file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(name)?;
+
 
         let metadata = file.metadata()?;
         if !metadata.is_file() {
@@ -1045,7 +1039,7 @@ fn process_filename(name: &str, options: CLIOptions) -> io::Result<bool> {
             eprintln!("FATAL: \"{}\" too short, expected at least 336 ($150) bytes, got only {}", name, metadata.len());
             nb_errors += 1;
         } else {
-            process_file(&file, &file, name, metadata.len() as u64, options)?;
+            process_file(&mut file, &mut temp_file, name, metadata.len(), options)?;
         }
     }
 
