@@ -1,4 +1,5 @@
 //TODO restore cargo.toml bin before shipping
+//TODO change options into default clap values
 
 use std::str::FromStr;
 use clap::Parser;
@@ -53,22 +54,22 @@ struct Cli {
     new_licensee: Option<String>,
 
     #[clap(short = 'l', long = "old-licensee", help = "Specify an old licensee", value_name = "OLD_LICENSEE")]
-    old_licensee: Option<String>,
+    old_licensee: Option<u8>,
 
     #[clap(short = 'm', long = "mbc-type", help = "Specify the MBC type", value_name = "MBC_TYPE")]
-    mbc_type: Option<String>,
+    mbc_type: Option<String>, //TOCHECK: is parsing the string required or does clap do it for me?
 
     #[clap(short = 'n', long = "rom-version", help = "Specify the ROM version", value_name = "ROM_VERSION")]
-    rom_version: Option<String>,
+    rom_version: Option<u8>,
 
     #[clap(short = 'O', long = "overwrite", help = "Overwrite the file")]
     overwrite: bool,
 
     #[clap(short = 'p', long = "pad-value", help = "Specify the padding value", value_name = "PAD_VALUE")]
-    pad_value: Option<String>,
+    pad_value: Option<u8>,
 
     #[clap(short = 'r', long = "ram-size", help = "Specify the RAM size", value_name = "RAM_SIZE")]
-    ram_size: Option<String>,
+    ram_size: Option<u8>,
 
     #[clap(short = 's', long = "sgb-compatible", help = "SGB-compatible mode")]
     sgb_compatible: bool,
@@ -237,7 +238,7 @@ fn main() {
     }
 
     if let Some(old_licensee) = cli.old_licensee {
-        // TODO: ???
+        cli_options.old_licensee = Some(old_licensee as u16) // TOCHECK: replacement for parsebyte, is this correct even though it's u16 and not u8?
     }
 
     if let Some(mbc_type) = cli.mbc_type {
@@ -261,7 +262,7 @@ fn main() {
     }
 
     if let Some(rom_version) = cli.rom_version {
-        // TODO: ??? Looks like parseByte gets undefined at the bottom of the C++ file, worth investigating...
+        cli_options.rom_version = Some(rom_version as u16)
     }
 
     if cli.overwrite {
@@ -269,11 +270,11 @@ fn main() {
     }
 
     if let Some(pad_value) = cli.pad_value {
-        // TODO: ???
+        cli_options.pad_value = Some(pad_value as u16)
     }
 
     if let Some(ram_size) = cli.ram_size {
-        // TODO: ???
+        cli_options.ram_size = Some(ram_size as u16)
     }
 
     if cli.sgb_compatible {
@@ -308,7 +309,7 @@ fn main() {
     }
 
     if cli.validate {
-        //TODO: ???
+        cli_options.fix_spec = vec![FixSpec::FixLogo, FixSpec::FixHeaderSum, FixSpec::FixGlobalSum];
     }
 
     if !cli.files.is_empty() {
@@ -886,7 +887,7 @@ fn process_file(input: &mut File, output: &mut File, name: &str, file_size: u64,
         // We want at least 2 banks
         if nb_banks == 1 {
             if rom0_len != rom0.len() {
-                // Fill the remaining space in rom0 with padValue
+                // Fill the remaining space in rom0 with pad_value
                 for i in rom0_len..rom0.len() {
                     rom0[i] = pad_value as u8;
                 }
