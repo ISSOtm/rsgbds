@@ -6,6 +6,7 @@ use clap::Parser;
 use std::io::{self, Read, Write, Seek};
 use std::os::unix::io::AsRawFd;
 use std::fs::{File, OpenOptions};
+use clap_num::maybe_hex;
 
 const BANK_SIZE: usize = 0x4000;
 const OPTSTRING: &str = "Ccf:i:jk:l:m:n:Op:r:st:Vv";
@@ -53,22 +54,22 @@ struct Cli {
     #[clap(short = 'k', long = "new-licensee", help = "Specify a new licensee", value_name = "NEW_LICENSEE")]
     new_licensee: Option<String>,
 
-    #[clap(short = 'l', long = "old-licensee", help = "Specify an old licensee", value_name = "OLD_LICENSEE")]
+    #[clap(short = 'l', long = "old-licensee", help = "Specify an old licensee", value_name = "OLD_LICENSEE", value_parser=maybe_hex::<u8>)]
     old_licensee: Option<u8>,
 
     #[clap(short = 'm', long = "mbc-type", help = "Specify the MBC type", value_name = "MBC_TYPE")]
     mbc_type: Option<String>, //TOCHECK: is parsing the string required or does clap do it for me?
 
-    #[clap(short = 'n', long = "rom-version", help = "Specify the ROM version", value_name = "ROM_VERSION")]
+    #[clap(short = 'n', long = "rom-version", help = "Specify the ROM version", value_name = "ROM_VERSION", value_parser=maybe_hex::<u8>)]
     rom_version: Option<u8>,
 
     #[clap(short = 'O', long = "overwrite", help = "Overwrite the file")]
     overwrite: bool,
 
-    #[clap(short = 'p', long = "pad-value", help = "Specify the padding value", value_name = "PAD_VALUE")]
+    #[clap(short = 'p', long = "pad-value", help = "Specify the padding value", value_name = "PAD_VALUE", value_parser=maybe_hex::<u8>)]
     pad_value: Option<u8>,
 
-    #[clap(short = 'r', long = "ram-size", help = "Specify the RAM size", value_name = "RAM_SIZE")]
+    #[clap(short = 'r', long = "ram-size", help = "Specify the RAM size", value_name = "RAM_SIZE", value_parser=maybe_hex::<u8>)]
     ram_size: Option<u8>,
 
     #[clap(short = 's', long = "sgb-compatible", help = "SGB-compatible mode")]
