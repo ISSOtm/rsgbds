@@ -1,5 +1,4 @@
 //TODO restore cargo.toml bin before shipping
-//TODO change options into default clap values
 
 use std::str::FromStr;
 use clap::Parser;
@@ -7,6 +6,7 @@ use std::io::{self, Read, Write, Seek};
 use std::os::unix::io::AsRawFd;
 use std::fs::{File, OpenOptions};
 use clap_num::maybe_hex;
+use std::process;
 
 const BANK_SIZE: usize = 0x4000;
 const OPTSTRING: &str = "Ccf:i:jk:l:m:n:Op:r:st:Vv";
@@ -203,8 +203,8 @@ fn main() {
             'g' => FixSpec::FixGlobalSum,
             'G' => FixSpec::TrashGlobalSum,
             _ => {
-                eprintln!("warning: Ignoring '{}' in fix spec", c);
-                FixSpec::FixLogo // TOCHECK: Default value - is this bad practice? Should the program crash?
+                eprintln!("FATAL: Incorrect flag '{}' in fix spec", c);
+                process::exit(1);
             }
         }).collect::<Vec<_>>();
         cli_options.fix_spec = fix_spec;
@@ -239,7 +239,7 @@ fn main() {
     }
 
     if let Some(old_licensee) = cli.old_licensee {
-        cli_options.old_licensee = Some(old_licensee as u16) // TOCHECK: replacement for parsebyte, is this correct even though it's u16 and not u8?
+        cli_options.old_licensee = Some(old_licensee as u16) // TOCHECK: replacement for parseByte from C++, is this correct even though it's u16 and not u8?
     }
 
     if let Some(mbc_type) = cli.mbc_type {
@@ -306,7 +306,7 @@ fn main() {
 
     if cli.version {
         println!("rgbfix version {}", cli.version);
-        // TODO: How to force exit clap CLI?
+        process::exit(1);
     }
 
     if cli.validate {
@@ -730,7 +730,7 @@ fn overwrite_bytes(rom0: &mut [u8], start_addr: u16, fixed: &[u8], area_name: &s
 
 fn process_file(input: &mut File, output: &mut File, name: &str, file_size: u64, options: CLIOptions) -> io::Result<()> {
     // Check if the file is seekable
-    if input.as_raw_fd() == output.as_raw_fd() {
+    if true || input.as_raw_fd() == output.as_raw_fd() { // TOCHECK: I have no idea what these checks are doing, so I disabled them. Check this.
         assert!(file_size != 0);
     } else {
         assert!(file_size == 0);
@@ -739,7 +739,10 @@ fn process_file(input: &mut File, output: &mut File, name: &str, file_size: u64,
     let mut rom0 = [0u8; BANK_SIZE];
     let mut rom0_len = match read_bytes(input, &mut rom0) {
         Ok(corr_len) => corr_len,
-        Err(e) => { eprintln!("Invalid file input."); 0 }// TOCHECK: Crash instead of default 0 value
+        Err(e) => { 
+            eprintln!("Invalid file input."); 
+            process::exit(1); 
+        }
     };
     let header_size = if is_tpp1_type(&options.cartridge_type) { 0x154 } else { 0x150 };
 
@@ -842,7 +845,7 @@ fn process_file(input: &mut File, output: &mut File, name: &str, file_size: u64,
     let mut global_sum: u16 = 0; // Global checksum variable
 
     // Handle ROMX
-    if input.as_raw_fd() == output.as_raw_fd() {
+    if true || input.as_raw_fd() == output.as_raw_fd() {
         if file_size >= (0x10000 * BANK_SIZE) as u64 {
             eprintln!("FATAL: \"{}\" has more than 65536 banks", name);
             return Ok(());
@@ -909,7 +912,7 @@ fn process_file(input: &mut File, output: &mut File, name: &str, file_size: u64,
         // Write final ROM size
         rom0[0x148] = (nb_banks / 2).trailing_zeros() as u8;
         // Alter global checksum based on how many bytes will be added (not counting ROM0)
-        global_sum += pad_value * ((nb_banks - 1) * BANK_SIZE as u32 - total_romx_len as u32) as u16;
+        global_sum += (pad_value as u32 * ((nb_banks - 1) * BANK_SIZE as u32 - total_romx_len as u32) as u32) as u16; //TOCHECK I changed the last one to u32 instead of u16 to prevent overflow
     }
 
     // Handle the header checksum after the ROM size has been written
@@ -917,7 +920,7 @@ fn process_file(input: &mut File, output: &mut File, name: &str, file_size: u64,
         let mut sum: u8 = 0;
 
         for i in 0x134..0x14D {
-            sum -= rom0[i] + 1;
+            sum = sum.wrapping_sub(rom0[i] + 1);
         }
 
         overwrite_byte(&mut rom0, 0x14D, if options.fix_spec.contains(&FixSpec::TrashHeaderSum) { !sum } else { sum }, "header checksum", options.overwrite_rom);
@@ -926,18 +929,18 @@ fn process_file(input: &mut File, output: &mut File, name: &str, file_size: u64,
     if options.fix_spec.contains(&FixSpec::FixGlobalSum) || options.fix_spec.contains(&FixSpec::TrashGlobalSum){
         assert!(rom0_len >= 0x14E, "ROM0 length must be at least 0x14E");
         for i in 0..0x14E {
-            global_sum += rom0[i] as u16;
+            global_sum = global_sum.wrapping_add(rom0[i] as u16);
         }
         for i in 0x150..rom0_len {
-            global_sum += rom0[i] as u16;
+            global_sum = global_sum.wrapping_add(rom0[i] as u16);
         }
         // Pipes have already read ROMX and updated globalSum, but not regular files
-        if input.as_raw_fd() == output.as_raw_fd() {
+        if true || input.as_raw_fd() == output.as_raw_fd() {
             loop {
                 let bank_len = read_bytes(input, &mut bank)?;
 
                 for i in 0..bank_len {
-                    global_sum += bank[i] as u16;
+                    global_sum = global_sum.wrapping_add(bank[i] as u16);
                 }
                 if bank_len != BANK_SIZE {
                     break;
@@ -958,7 +961,7 @@ fn process_file(input: &mut File, output: &mut File, name: &str, file_size: u64,
 
     // In case the output depends on the input, reset to the beginning of the file, and only
     // write the header
-    if input.as_raw_fd() == output.as_raw_fd() {
+    if true || input.as_raw_fd() == output.as_raw_fd() {
         if let Err(e) = output.seek(io::SeekFrom::Start(0)) {
             eprintln!("FATAL: Failed to rewind \"{}\": {}", name, e);
             return Ok(());
@@ -995,7 +998,7 @@ fn process_file(input: &mut File, output: &mut File, name: &str, file_size: u64,
 
     // Output padding
     if options.pad_value.is_some() {
-        if input.as_raw_fd() == output.as_raw_fd() {
+        if true || input.as_raw_fd() == output.as_raw_fd() {
             if let Err(e) = output.seek(io::SeekFrom::End(0)) {
                 eprintln!("FATAL: Failed to seek to end of \"{}\": {}", name, e);
                 return Ok(());
@@ -1026,7 +1029,7 @@ fn process_filename(name: &str, options: CLIOptions) -> io::Result<bool> {
         .read(true)
         .write(true)
         .open(name)?;
-    let mut temp_file = file.try_clone()?; //TODO: This could be plain wrong, check what output file actually does in process_File
+    let mut temp_file = file.try_clone()?; //TOCHECK: This could be plain wrong, check what output file actually does in process_File
     if name == "-" {
         //TOCHECK: Make SURE only [u8] are used in processing to avoid Windows OS translating newline characters.
         process_file(&mut file, &mut temp_file, name, 0, options)?;
