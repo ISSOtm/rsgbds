@@ -20,12 +20,12 @@ pub struct CLIOptions {
     game_id: Option<String>,
     japanese: bool,
     new_licensee: Option<String>,
-    old_licensee: Option<u16>,
+    old_licensee: Option<u8>,
     cartridge_type: MbcType,
-    rom_version: Option<u16>,
+    rom_version: Option<u8>,
     overwrite_rom: bool,
-    pad_value: Option<u16>,
-    ram_size: Option<u16>,
+    pad_value: Option<u8>,
+    ram_size: Option<u8>,
     sgb: bool,
     fix_spec: Vec<FixSpec>,
     model: Model,
@@ -239,7 +239,7 @@ fn main() {
     }
 
     if let Some(old_licensee) = cli.old_licensee {
-        cli_options.old_licensee = Some(old_licensee as u16) // TOCHECK: replacement for parseByte from C++, is this correct even though it's u16 and not u8?
+        cli_options.old_licensee = Some(old_licensee)
     }
 
     if let Some(mbc_type) = cli.mbc_type {
@@ -263,7 +263,7 @@ fn main() {
     }
 
     if let Some(rom_version) = cli.rom_version {
-        cli_options.rom_version = Some(rom_version as u16)
+        cli_options.rom_version = Some(rom_version)
     }
 
     if cli.overwrite {
@@ -271,11 +271,11 @@ fn main() {
     }
 
     if let Some(pad_value) = cli.pad_value {
-        cli_options.pad_value = Some(pad_value as u16)
+        cli_options.pad_value = Some(pad_value)
     }
 
     if let Some(ram_size) = cli.ram_size {
-        cli_options.ram_size = Some(ram_size as u16)
+        cli_options.ram_size = Some(ram_size)
     }
 
     if cli.sgb_compatible {
@@ -912,7 +912,10 @@ fn process_file(input: &mut File, output: &mut File, name: &str, file_size: u64,
         // Write final ROM size
         rom0[0x148] = (nb_banks / 2).trailing_zeros() as u8;
         // Alter global checksum based on how many bytes will be added (not counting ROM0)
-        global_sum += (pad_value as u32 * ((nb_banks - 1) * BANK_SIZE as u32 - total_romx_len as u32) as u32) as u16; //TOCHECK I changed the last one to u32 instead of u16 to prevent overflow
+
+        let intermediate_result = ((nb_banks - 1) * BANK_SIZE as u32 - total_romx_len as u32) as u8; //TOCHECK This also uses the wrapping mult, assuming C++ was exploiting overflow on purpose
+        let result = pad_value.wrapping_mul(intermediate_result);
+        global_sum += result as u16;
     }
 
     // Handle the header checksum after the ROM size has been written
