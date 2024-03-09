@@ -9,14 +9,9 @@ use clap_num::maybe_hex;
 use std::process;
 
 const BANK_SIZE: usize = 0x4000;
-const OPTSTRING: &str = "Ccf:i:jk:l:m:n:Op:r:st:Vv";
-const FIX_HEADER_SUM: u8 = 0x20;
-const TRASH_HEADER_SUM: u8 = 0x10;
-const FIX_GLOBAL_SUM: u8 = 0x08;
-const TRASH_GLOBAL_SUM: u8 = 0x04;
 
 #[derive(Debug, Clone)]
-pub struct CLIOptions {
+pub struct CliOptions {
     game_id: Option<String>,
     japanese: bool,
     new_licensee: Option<String>,
@@ -175,7 +170,7 @@ logo![
 
 fn main() {
 
-    let mut cli_options = CLIOptions {
+    let mut cli_options = CliOptions {
         game_id: None,
         japanese: true,
         new_licensee: None,
@@ -306,7 +301,7 @@ fn main() {
 
     if cli.version {
         println!("rgbfix version {}", cli.version);
-        process::exit(1);
+        process::exit(0);
     }
 
     if cli.validate {
@@ -317,16 +312,6 @@ fn main() {
         process_filename(&cli.files[0], cli_options); // TOCHECK [0] is dubious, are multiple files getting fixed in one CLI call possible?
     }
 
-}
-
-fn report(fmt: &str, args: &[&str]) -> io::Result<()> {
-    let mut stderr = io::stderr();
-    write!(&mut stderr, "{}", fmt)?;
-    for arg in args {
-        write!(&mut stderr, " {}", arg)?;
-    }
-    writeln!(&mut stderr)?;
-    Ok(())
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -728,7 +713,7 @@ fn overwrite_bytes(rom0: &mut [u8], start_addr: u16, fixed: &[u8], area_name: &s
     Ok(())
 }
 
-fn process_file(input: &mut File, output: &mut File, name: &str, file_size: u64, options: CLIOptions) -> io::Result<()> {
+fn process_file(input: &mut File, output: &mut File, name: &str, file_size: u64, options: CliOptions) -> io::Result<()> {
     // Check if the file is seekable
     if true || input.as_raw_fd() == output.as_raw_fd() { // TOCHECK: I have no idea what these checks are doing, so I disabled them. Check this.
         assert!(file_size != 0);
@@ -753,7 +738,7 @@ fn process_file(input: &mut File, output: &mut File, name: &str, file_size: u64,
     }
 
     for fix_spec in &options.fix_spec {
-        if matches!(fix_spec, FixSpec::FixLogo) || matches!(fix_spec, FixSpec::TrashLogo) {
+        if matches!(fix_spec, FixSpec::FixLogo | FixSpec::TrashLogo) { 
             match fix_spec {
                 FixSpec::FixLogo => overwrite_bytes(&mut rom0, 0x0104, &NINTENDO_LOGO, "Nintendo logo", options.overwrite_rom),
                 FixSpec::TrashLogo => overwrite_bytes(&mut rom0, 0x0104, &TRASH_LOGO, "Nintendo logo", options.overwrite_rom),
@@ -771,11 +756,11 @@ fn process_file(input: &mut File, output: &mut File, name: &str, file_size: u64,
     }
 
     if !matches!(options.model, Model::Dmg) {
-        match options.model {
-            Model::Both => overwrite_byte(&mut rom0, 0x143, 0x80, "Cgb flag", options.overwrite_rom),
-            Model::Cgb => overwrite_byte(&mut rom0, 0x143, 0xC0, "Cgb flag", options.overwrite_rom),
-            _ => (),
-        };
+        match options.model {  
+            Model::Both => overwrite_byte(&mut rom0, 0x143, 0x80, "Cgb flag", options.overwrite_rom),  
+            Model::Cgb => overwrite_byte(&mut rom0, 0x143, 0xC0, "Cgb flag", options.overwrite_rom),  
+            Model::Dmg => (),  
+        };  
     };
 
     if let Some(new_licensee) = options.new_licensee {
@@ -937,7 +922,7 @@ fn process_file(input: &mut File, output: &mut File, name: &str, file_size: u64,
         for i in 0x150..rom0_len {
             global_sum = global_sum.wrapping_add(rom0[i] as u16);
         }
-        // Pipes have already read ROMX and updated globalSum, but not regular files
+        // Pipes have already read ROMX and updated global_sum, but not regular files
         if true || input.as_raw_fd() == output.as_raw_fd() {
             loop {
                 let bank_len = read_bytes(input, &mut bank)?;
@@ -975,12 +960,10 @@ fn process_file(input: &mut File, output: &mut File, name: &str, file_size: u64,
             rom0_len = header_size;
         }
     }
-    write_len = write_bytes(output, &rom0[..rom0_len])? as isize;
+    
+    write_len = write_bytes(output, &rom0[..rom0_len])?;
 
-    if write_len == -1 {
-        eprintln!("FATAL: Failed to write \"{}\"'s ROM0: {}", name, io::Error::last_os_error());
-        return Ok(());
-    } else if (write_len as usize) < rom0_len {
+    if (write_len) < rom0_len {
         eprintln!("FATAL: Could only write {} of \"{}\"'s {} ROM0 bytes",
             write_len, name, rom0_len);
         return Ok(());
@@ -988,11 +971,8 @@ fn process_file(input: &mut File, output: &mut File, name: &str, file_size: u64,
 
     // Output ROMX if it was buffered
     if !romx.is_empty() {
-        write_len = write_bytes(output, &romx[..total_romx_len])? as isize;
-        if write_len == -1 {
-            eprintln!("FATAL: Failed to write \"{}\"'s ROMX: {}", name, io::Error::last_os_error());
-            return Ok(());
-        } else if (write_len as usize) < total_romx_len {
+        write_len = write_bytes(output, &romx[..total_romx_len])?;
+        if (write_len) < total_romx_len {
             eprintln!("FATAL: Could only write {} of \"{}\"'s {} ROMX bytes",
                 write_len, name, total_romx_len);
             return Ok(());
@@ -1026,7 +1006,7 @@ fn process_file(input: &mut File, output: &mut File, name: &str, file_size: u64,
     Ok(())
 }
 
-fn process_filename(name: &str, options: CLIOptions) -> io::Result<bool> {
+fn process_filename(name: &str, options: CliOptions) -> io::Result<bool> {
     let mut nb_errors = 0;
     let mut file = OpenOptions::new()
         .read(true)
