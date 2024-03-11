@@ -29,59 +29,77 @@ pub struct CliOptions {
 }
 
 #[derive(Parser, Debug)]
-#[clap(version = "1.0", help = "A tool to fix ROM files for Game Boy.")]
+#[clap(version = "1.0", about = "A tool to fix ROM files for Game Boy.")]
 struct Cli {
-    #[clap(short = 'C', long = "color-only", help = "Color-only mode")]
+    #[clap(short = 'C', long = "color-only")]
+    /// Color-only mode
     color_only: bool,
 
-    #[clap(short = 'c', long = "color-compatible", help = "Color-compatible mode")]
+    #[clap(short = 'c', long = "color-compatible")]
+    /// Color-compatible mode
     color_compatible: bool,
 
-    #[clap(short = 'f', long = "fix-spec", help = "Specify a fix specification", value_name = "FIX_SPEC")]
+    #[clap(short = 'f', long = "fix-spec", value_name = "FIX_SPEC")]
+    /// Specify a fix specification
     fix_spec: Option<String>,
 
-    #[clap(short = 'i', long = "game-id", help = "Specify a game ID", value_name = "GAME_ID")]
+    #[clap(short = 'i', long = "game-id", value_name = "GAME_ID")]
+    /// Specify a game ID
     game_id: Option<String>,
 
-    #[clap(short = 'j', long = "non-japanese", help = "Non-Japanese mode")]
+    #[clap(short = 'j', long = "non-japanese")]
+    /// Non-Japanese mode
     non_japanese: bool,
 
-    #[clap(short = 'k', long = "new-licensee", help = "Specify a new licensee", value_name = "NEW_LICENSEE")]
+    #[clap(short = 'k', long = "new-licensee", value_name = "NEW_LICENSEE")]
+    /// Specify a new licensee
     new_licensee: Option<String>,
 
-    #[clap(short = 'l', long = "old-licensee", help = "Specify an old licensee", value_name = "OLD_LICENSEE", value_parser=maybe_hex::<u8>)]
+    #[clap(short = 'l', long = "old-licensee", value_name = "OLD_LICENSEE", value_parser=maybe_hex::<u8>)]
+    /// Specify an old licensee
     old_licensee: Option<u8>,
 
-    #[clap(short = 'm', long = "mbc-type", help = "Specify the MBC type", value_name = "MBC_TYPE")]
-    mbc_type: Option<String>, //TOCHECK: is parsing the string required or does clap do it for me?
+    #[clap(short = 'm', long = "mbc-type", value_name = "MBC_TYPE")]
+    /// Specify the MBC type
+    mbc_type: Option<String>,
 
-    #[clap(short = 'n', long = "rom-version", help = "Specify the ROM version", value_name = "ROM_VERSION", value_parser=maybe_hex::<u8>)]
+    #[clap(short = 'n', long = "rom-version", value_name = "ROM_VERSION", value_parser=maybe_hex::<u8>)]
+    /// Specify the ROM version
     rom_version: Option<u8>,
 
-    #[clap(short = 'O', long = "overwrite", help = "Overwrite the file")]
+    #[clap(short = 'O', long = "overwrite")]
+    /// Overwrite the file
     overwrite: bool,
 
-    #[clap(short = 'p', long = "pad-value", help = "Specify the padding value", value_name = "PAD_VALUE", value_parser=maybe_hex::<u8>)]
+    #[clap(short = 'p', long = "pad-value", value_name = "PAD_VALUE", value_parser=maybe_hex::<u8>)]
+    /// Specify the padding value
     pad_value: Option<u8>,
 
-    #[clap(short = 'r', long = "ram-size", help = "Specify the RAM size", value_name = "RAM_SIZE", value_parser=maybe_hex::<u8>)]
+    #[clap(short = 'r', long = "ram-size", value_name = "RAM_SIZE", value_parser=maybe_hex::<u8>)]
+    /// Specify the RAM size
     ram_size: Option<u8>,
 
-    #[clap(short = 's', long = "sgb-compatible", help = "SGB-compatible mode")]
+    #[clap(short = 's', long = "sgb-compatible")]
+    /// SGB-compatible mode
     sgb_compatible: bool,
 
-    #[clap(short = 't', long = "title", help = "Specify the title", value_name = "TITLE")]
+    #[clap(short = 't', long = "title", value_name = "TITLE")]
+    /// Specify the title
     title: Option<String>,
 
-    #[clap(short = 'V', long = "version", help = "Print RGBFIX version and exit")]
+    #[clap(short = 'V', long = "version")]
+    /// Print RGBFIX version and exit
     version: bool,
 
-    #[clap(short = 'v', long = "validate", help = "Fix the header logo and both checksums (-f lhg)")]
+    #[clap(short = 'v', long = "validate")]
+    /// Fix the header logo and both checksums (-f lhg)
     validate: bool,
 
-    #[clap(help = "Files to process")]
+    #[clap(value_name = "FILES")]
+    /// Files to process
     files: Vec<String>,
 }
+
 
 
 #[derive(Debug, Clone, PartialEq)]
