@@ -951,7 +951,7 @@ fn process_file(input: &mut File, output: &mut File, name: &str, file_size: u64,
     if (write_len) < rom0_len {
         eprintln!("FATAL: Could only write {} of \"{}\"'s {} ROM0 bytes",
             write_len, name, rom0_len);
-        return Ok(());
+        return Err(io::Error::new(io::ErrorKind::UnexpectedEof, ""));
     }
 
     // Output ROMX if it was buffered
@@ -960,7 +960,7 @@ fn process_file(input: &mut File, output: &mut File, name: &str, file_size: u64,
         if (write_len) < total_romx_len {
             eprintln!("FATAL: Could only write {} of \"{}\"'s {} ROMX bytes",
                 write_len, name, total_romx_len);
-            return Ok(());
+            return Err(io::Error::new(io::ErrorKind::UnexpectedEof, ""));
         }
     }
 
@@ -969,10 +969,10 @@ fn process_file(input: &mut File, output: &mut File, name: &str, file_size: u64,
         if true || input.as_raw_fd() == output.as_raw_fd() {
             if let Err(e) = output.seek(io::SeekFrom::End(0)) {
                 eprintln!("FATAL: Failed to seek to end of \"{}\": {}", name, e);
-                return Ok(());
+                return Err(io::Error::new(io::ErrorKind::InvalidInput, ""));
             }
         }
-        bank.fill(options.pad_value.unwrap() as u8);
+        bank.fill(options.pad_value.unwrap());
         let mut len = (nb_banks - 1) * BANK_SIZE as u32 - total_romx_len as u32; // Don't count ROM0!
 
         while len > 0 {
