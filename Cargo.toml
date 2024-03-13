@@ -31,6 +31,10 @@ lalrpop = { version = "0.19.8", default-features = false }
 
 [[bin]]
 name = "rgbasm"
+path = "src/asm/main.rs"
+
+[[bin]]
+name = "rgbfix"
 path = "src/fix/main.rs"
 
 [workspace]

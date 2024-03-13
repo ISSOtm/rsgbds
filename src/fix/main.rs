@@ -22,7 +22,7 @@ pub struct CliOptions {
     pad_value: Option<u8>,
     ram_size: Option<u8>,
     sgb: bool,
-    fix_spec: Vec<FixSpec>,
+    fix_spec: FixSpec,
     model: Model,
     title: Option<String>,
     title_len: usize,
@@ -39,7 +39,7 @@ struct Cli {
     /// Color-compatible mode
     color_compatible: bool,
 
-    #[clap(short = 'f', long = "fix-spec", value_name = "FIX_SPEC")]
+    #[clap(short = 'f', long = "fix-spec", value_name = "FIX_SPEC", validator = parse_fix_spec)]
     /// Specify a fix specification
     fix_spec: Option<String>,
 
@@ -100,16 +100,47 @@ struct Cli {
     files: Vec<String>,
 }
 
-
+fn parse_fix_spec(s: &str) -> Result<FixSpec, String> {
+    s.parse::<FixSpec>()
+}
 
 #[derive(Debug, Clone, PartialEq)]
-enum FixSpec {
-    FixLogo,
-    TrashLogo,
-    FixHeaderSum,
-    TrashHeaderSum,
-    FixGlobalSum,
-    TrashGlobalSum,
+enum FixState {
+    Trash,
+    Fix,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct FixSpec {
+    logo: Option<FixState>,
+    header: Option<FixState>,
+    global: Option<FixState>,
+}
+
+impl FromStr for FixSpec {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut fix_spec = FixSpec {
+            logo: None,
+            header: None,
+            global: None,
+        };
+
+        for c in s.chars() { // TOCHECK if something weird like "lL" is provided, this could do unexpected default behaviour
+            match c {
+                'l' => fix_spec.logo = Some(FixState::Fix),
+                'L' => fix_spec.logo = Some(FixState::Trash),
+                'h' => fix_spec.header = Some(FixState::Fix),
+                'H' => fix_spec.header = Some(FixState::Trash),
+                'g' => fix_spec.global = Some(FixState::Fix),
+                'G' => fix_spec.global = Some(FixState::Trash),
+                _ => return Err(format!("Invalid character: {}", c)),
+            }
+        }
+
+        Ok(fix_spec)
+    }
 }
 
 macro_rules! logo {
@@ -201,28 +232,12 @@ fn main() {
         ram_size: None,
         sgb: false,
         model: Model::Dmg,
-        fix_spec: Vec::new(),
+        fix_spec: FixSpec { logo: None, header: None, global: None },
         title: None,
         title_len: 0,
     };
 
     let cli = Cli::parse();
-
-    if let Some(fix_spec) = cli.fix_spec {
-        let fix_spec = fix_spec.chars().map(|c| match c {
-            'l' => FixSpec::FixLogo,
-            'L' => FixSpec::TrashLogo,
-            'h' => FixSpec::FixHeaderSum,
-            'H' => FixSpec::TrashHeaderSum,
-            'g' => FixSpec::FixGlobalSum,
-            'G' => FixSpec::TrashGlobalSum,
-            _ => {
-                eprintln!("FATAL: Incorrect flag '{}' in fix spec", c);
-                process::exit(1);
-            }
-        }).collect::<Vec<_>>();
-        cli_options.fix_spec = fix_spec;
-    }
 
     if let Some(mut game_id) = cli.game_id {
         if game_id.len() > 4 {
@@ -320,11 +335,11 @@ fn main() {
     }
 
     if cli.validate {
-        cli_options.fix_spec = vec![FixSpec::FixLogo, FixSpec::FixHeaderSum, FixSpec::FixGlobalSum];
+        cli_options.fix_spec = FixSpec {logo: Some(FixState::Fix), header: Some(FixState::Fix), global: Some(FixState::Fix)};
     }
 
     if !cli.files.is_empty() {
-        process_filename(&cli.files[0], cli_options); // TOCHECK [0] is dubious, are multiple files getting fixed in one CLI call possible?
+        let _ = process_filename(&cli.files[0], cli_options); // TOCHECK [0] is dubious, are multiple files getting fixed in one CLI call possible?
     }
 
 }
@@ -476,55 +491,6 @@ fn get_mbc_enum(mbc_type: u16) -> MbcType {
             eprintln!("Invalid MbcType.");
             process::exit(1);
         }
-    }
-}
-
-fn get_mbc_name(mbc_type: MbcType) -> &'static str {
-    match mbc_type {
-        MbcType::Rom => "ROM",
-        MbcType::RomRam => "ROM+RAM",
-        MbcType::RomRamBattery => "ROM+RAM+BATTERY",
-        MbcType::Mbc1 => "MBC1",
-        MbcType::Mbc1Ram => "MBC1+RAM",
-        MbcType::Mbc1RamBattery => "MBC1+RAM+BATTERY",
-        MbcType::Mbc2 => "MBC2",
-        MbcType::Mbc2Battery => "MBC2+BATTERY",
-        MbcType::Mmm01 => "MMM01",
-        MbcType::Mmm01Ram => "MMM01+RAM",
-        MbcType::Mmm01RamBattery => "MMM01+RAM+BATTERY",
-        MbcType::Mbc3 => "MBC3",
-        MbcType::Mbc3TimerBattery => "MBC3+TIMER+BATTERY",
-        MbcType::Mbc3TimerRamBattery => "MBC3+TIMER+RAM+BATTERY",
-        MbcType::Mbc3Ram => "MBC3+RAM",
-        MbcType::Mbc3RamBattery => "MBC3+RAM+BATTERY",
-        MbcType::Mbc5 => "MBC5",
-        MbcType::Mbc5Ram => "MBC5+RAM",
-        MbcType::Mbc5RamBattery => "MBC5+RAM+BATTERY",
-        MbcType::Mbc5Rumble => "MBC5+RUMBLE",
-        MbcType::Mbc5RumbleRam => "MBC5+RUMBLE+RAM",
-        MbcType::Mbc5RumbleRamBattery => "MBC5+RUMBLE+RAM+BATTERY",
-        MbcType::Mbc6 => "MBC6",
-        MbcType::Mbc7SensorRumbleRamBattery => "MBC7+SENSOR+RUMBLE+RAM+BATTERY",
-        MbcType::PocketCamera => "POCKET CAMERA",
-        MbcType::BandaiTama5 => "BANDAI TAMA5",
-        MbcType::Huc3 => "HUC3",
-        MbcType::Huc1RamBattery => "HUC1+RAM+BATTERY",
-        MbcType::Tpp1 => "TPP1",
-        MbcType::Tpp1Rumble => "TPP1+RUMBLE",
-        MbcType::Tpp1MultiRumble => "TPP1+MULTIRUMBLE",
-        MbcType::Tpp1MultiRumbleRumble => "TPP1+MULTIRUMBLE",
-        MbcType::Tpp1Timer => "TPP1+TIMER",
-        MbcType::Tpp1TimerRumble => "TPP1+TIMER+RUMBLE",
-        MbcType::Tpp1TimerMultiRumble => "TPP1+TIMER+MULTIRUMBLE",
-        MbcType::Tpp1TimerMultiRumbleRumble => "TPP1+TIMER+MULTIRUMBLE",
-        MbcType::Tpp1Battery => "TPP1+BATTERY",
-        MbcType::Tpp1BatteryRumble => "TPP1+BATTERY+RUMBLE",
-        MbcType::Tpp1BatteryMultiRumble => "TPP1+BATTERY+MULTIRUMBLE",
-        MbcType::Tpp1BatteryMultiRumbleRumble => "TPP1+BATTERY+MULTIRUMBLE",
-        MbcType::Tpp1BatteryTimer => "TPP1+BATTERY+TIMER",
-        MbcType::Tpp1BatteryTimerRumble => "TPP1+BATTERY+TIMER+RUMBLE",
-        MbcType::Tpp1BatteryTimerMultiRumble => "TPP1+BATTERY+TIMER+MULTIRUMBLE",
-        MbcType::Tpp1BatteryTimerMultiRumbleRumble => "TPP1+BATTERY+TIMER+MULTIRUMBLE",
     }
 }
 
@@ -726,7 +692,7 @@ fn process_file(input: &mut File, output: &mut File, name: &str, file_size: u64,
     let mut rom0 = [0u8; BANK_SIZE];
     let mut rom0_len = match read_bytes(input, &mut rom0) {
         Ok(corr_len) => corr_len,
-        Err(e) => { 
+        Err(_e) => { 
             eprintln!("Invalid file input."); 
             process::exit(1); 
         }
@@ -740,22 +706,18 @@ fn process_file(input: &mut File, output: &mut File, name: &str, file_size: u64,
         return Err(io::Error::new(io::ErrorKind::InvalidInput, "File too short"));
     }
 
-    for fix_spec in &options.fix_spec {
-        if matches!(fix_spec, FixSpec::FixLogo | FixSpec::TrashLogo) { 
-            match fix_spec {
-                FixSpec::FixLogo => overwrite_bytes(&mut rom0, 0x0104, &NINTENDO_LOGO, "Nintendo logo", options.overwrite_rom),
-                FixSpec::TrashLogo => overwrite_bytes(&mut rom0, 0x0104, &TRASH_LOGO, "Nintendo logo", options.overwrite_rom),
-                _ => Ok(()),
-            };
-        };
-    }
+    let _ = match options.fix_spec.logo {
+        Some(FixState::Fix) => overwrite_bytes(&mut rom0, 0x0104, &NINTENDO_LOGO, "Nintendo logo", options.overwrite_rom),
+        Some(FixState::Trash) => overwrite_bytes(&mut rom0, 0x0104, &TRASH_LOGO, "Nintendo logo", options.overwrite_rom),
+        None => Ok (()),
+    };
 
     if let Some(title) = options.title {
-        overwrite_bytes(&mut rom0[..], 0x134, title.as_bytes(), "title", options.overwrite_rom);
+        overwrite_bytes(&mut rom0[..], 0x134, title.as_bytes(), "title", options.overwrite_rom)?;
     }
 
     if let Some(game_id) = options.game_id {
-        overwrite_bytes(&mut rom0[..], 0x13F, game_id.as_bytes(), "manufacturer code", options.overwrite_rom);
+        let _ = overwrite_bytes(&mut rom0[..], 0x13F, game_id.as_bytes(), "manufacturer code", options.overwrite_rom);
     }
 
     if !matches!(options.model, Model::Dmg) {
@@ -767,11 +729,11 @@ fn process_file(input: &mut File, output: &mut File, name: &str, file_size: u64,
     };
 
     if let Some(new_licensee) = options.new_licensee {
-        overwrite_bytes(&mut rom0[..], 0x144, new_licensee.as_bytes(), "new licensee code", options.overwrite_rom);
+        let _ = overwrite_bytes(&mut rom0[..], 0x144, new_licensee.as_bytes(), "new licensee code", options.overwrite_rom);
     }
 
     if options.sgb {
-        overwrite_byte(&mut rom0[..], 0x146, 0x03, "SGB flag", options.overwrite_rom);
+        let _ = overwrite_byte(&mut rom0[..], 0x146, 0x03, "SGB flag", options.overwrite_rom);
     }
 
     let ram_size = options.ram_size;
@@ -795,9 +757,9 @@ fn process_file(input: &mut File, output: &mut File, name: &str, file_size: u64,
         let tpp1_rev = vec![0xC1, 0x65]; // TODO WARNING PLACEHOLDER NOT ACTUAL VALUES, PICK UP FROM OPTIONS INSTEAD?
 
         // TODO: I don't understand this part. Tpp1_rev comes from tryReadSlice and I still don't understand very well what it does.
-        overwrite_bytes(&mut rom0[..], 0x149, &tpp1_code, "TPP1 identification code", options.overwrite_rom);
+        let _ = overwrite_bytes(&mut rom0[..], 0x149, &tpp1_code, "TPP1 identification code", options.overwrite_rom);
 
-        overwrite_bytes(&mut rom0[..], 0x150, &tpp1_rev, "TPP1 revision number", options.overwrite_rom);
+        let _ = overwrite_bytes(&mut rom0[..], 0x150, &tpp1_rev, "TPP1 revision number", options.overwrite_rom);
 
         if let Some(ram_size) = ram_size {
             overwrite_byte(&mut rom0[..], 0x152, ram_size as u8, "RAM size", options.overwrite_rom);
@@ -907,17 +869,17 @@ fn process_file(input: &mut File, output: &mut File, name: &str, file_size: u64,
     }
 
     // Handle the header checksum after the ROM size has been written
-    if options.fix_spec.contains(&FixSpec::FixHeaderSum) || options.fix_spec.contains(&FixSpec::TrashHeaderSum){
+    if options.fix_spec.header.is_some() {
         let mut sum: u8 = 0;
 
         for i in 0x134..0x14D {
             sum = sum.wrapping_sub(rom0[i] + 1);
         }
 
-        overwrite_byte(&mut rom0, 0x14D, if options.fix_spec.contains(&FixSpec::TrashHeaderSum) { !sum } else { sum }, "header checksum", options.overwrite_rom);
+        overwrite_byte(&mut rom0, 0x14D, if matches!(options.fix_spec.header, Some(FixState::Trash)) { !sum } else { sum }, "header checksum", options.overwrite_rom);
     }
 
-    if options.fix_spec.contains(&FixSpec::FixGlobalSum) || options.fix_spec.contains(&FixSpec::TrashGlobalSum){
+    if options.fix_spec.global.is_some() { 
         assert!(rom0_len >= 0x14E, "ROM0 length must be at least 0x14E");
         for i in 0..0x14E {
             global_sum = global_sum.wrapping_add(rom0[i] as u16);
@@ -939,13 +901,13 @@ fn process_file(input: &mut File, output: &mut File, name: &str, file_size: u64,
             }
         }
 
-        if options.fix_spec.contains(&FixSpec::TrashGlobalSum) {
+        if matches!(options.fix_spec.global, Some(FixState::Trash)) {
             global_sum = !global_sum;
         }
 
         let bytes = global_sum.to_be_bytes();
 
-        overwrite_bytes(&mut rom0, 0x14E, &bytes, "global checksum", options.overwrite_rom);
+        let _ = overwrite_bytes(&mut rom0, 0x14E, &bytes, "global checksum", options.overwrite_rom);
     }
 
     let mut write_len: usize;
