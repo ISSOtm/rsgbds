@@ -1,12 +1,12 @@
 //TODO restore cargo.toml bin before shipping
 
-use std::str::FromStr;
 use clap::Parser;
-use std::io::{self, Read, Write, Seek};
-use std::os::unix::io::AsRawFd;
-use std::fs::{File, OpenOptions};
 use clap_num::maybe_hex;
+use std::fs::{File, OpenOptions};
+use std::io::{self, Read, Seek, Write};
+use std::os::unix::io::AsRawFd;
 use std::process;
+use std::str::FromStr;
 
 const BANK_SIZE: usize = 0x4000;
 
@@ -127,7 +127,8 @@ impl FromStr for FixSpec {
             global: None,
         };
 
-        for c in s.chars() { // TOCHECK if something weird like "lL" is provided, this could do unexpected default behaviour
+        for c in s.chars() {
+            // TOCHECK if something weird like "lL" is provided, this could do unexpected default behaviour
             match c {
                 'l' => fix_spec.logo = Some(FixState::Fix),
                 'L' => fix_spec.logo = Some(FixState::Trash),
@@ -219,7 +220,6 @@ logo![
 ];
 
 fn main() {
-
     let mut cli_options = CliOptions {
         game_id: None,
         japanese: true,
@@ -232,7 +232,11 @@ fn main() {
         ram_size: None,
         sgb: false,
         model: Model::Dmg,
-        fix_spec: FixSpec { logo: None, header: None, global: None },
+        fix_spec: FixSpec {
+            logo: None,
+            header: None,
+            global: None,
+        },
         title: None,
         title_len: 0,
     };
@@ -249,7 +253,7 @@ fn main() {
             println!("Game ID: {}", &game_id);
         }
         cli_options.game_id = Some(game_id);
-    }    
+    }
 
     if cli.non_japanese {
         cli_options.japanese = false;
@@ -258,7 +262,10 @@ fn main() {
     if let Some(mut new_licensee) = cli.new_licensee {
         let len = new_licensee.len() as u8;
         if len > 2 {
-            println!("warning: Truncating new licensee \"{}\" to 2 chars", &new_licensee);
+            println!(
+                "warning: Truncating new licensee \"{}\" to 2 chars",
+                &new_licensee
+            );
             new_licensee = new_licensee[0..2].to_string();
             println!("Truncated new licencee: {}", &new_licensee[0..2]);
         } else {
@@ -272,18 +279,15 @@ fn main() {
     }
 
     if let Some(mbc_type) = cli.mbc_type {
-        let mbc_type_result = mbc_type.parse::<MbcType>();
-        match mbc_type_result {
-            Ok(mbc_type) => {
-                cli_options.cartridge_type = Some(mbc_type);
-            },
-            Err(_e) => {
-                eprintln!("Error parsing MbcType.");
-                process::exit(1);
-            }
-        }
-        if matches!(&cli_options.cartridge_type.clone().unwrap(), MbcType::RomRam | MbcType::RomRamBattery) {
-            eprintln!("warning: ROM+RAM / ROM+RAM+BATTERY are under-specified and poorly supported");
+        let mbc_type = mbc_type.parse::<MbcType>().unwrap_or_else(|msg| {
+            eprintln!("failed to parse mbc type: {msg}");
+            process::exit(1);
+        });
+        cli_options.cartridge_type = Some(mbc_type);
+        if matches!(mbc_type, MbcType::Rom(Some(_))) {
+            eprintln!(
+                "warning: ROM+RAM / ROM+RAM+BATTERY are under-specified and poorly supported"
+            );
         }
     }
 
@@ -313,13 +317,20 @@ fn main() {
         let max_len = max_title_len(&cli_options.game_id, &cli_options.model);
         if len > max_len {
             len = max_len;
-            println!("warning: Truncating title \"{}\" to {} chars", title, max_len);
+            println!(
+                "warning: Truncating title \"{}\" to {} chars",
+                title, max_len
+            );
             cli_options.title_len = len;
         }
     }
 
     if cli.color_only || cli.color_compatible {
-        cli_options.model = if cli.color_compatible { Model::Both } else { Model::Cgb };
+        cli_options.model = if cli.color_compatible {
+            Model::Both
+        } else {
+            Model::Cgb
+        };
         if cli_options.title_len > 15 {
             if let Some(mut title) = cli_options.title {
                 title = title[0..15].to_string();
@@ -335,245 +346,269 @@ fn main() {
     }
 
     if cli.validate {
-        cli_options.fix_spec = FixSpec {logo: Some(FixState::Fix), header: Some(FixState::Fix), global: Some(FixState::Fix)};
+        cli_options.fix_spec = FixSpec {
+            logo: Some(FixState::Fix),
+            header: Some(FixState::Fix),
+            global: Some(FixState::Fix),
+        };
     }
-
     if !cli.files.is_empty() {
-        let _ = process_filename(&cli.files[0], cli_options); // TOCHECK [0] is dubious, are multiple files getting fixed in one CLI call possible?
-    }
-
-}
-
-#[derive(Debug, Clone, PartialEq)]
-enum MbcType {
-    Rom,
-    RomRam,
-    RomRamBattery,
-    Mbc1,
-    Mbc1Ram,
-    Mbc1RamBattery,
-    Mbc2,
-    Mbc2Battery,
-    Mmm01,
-    Mmm01Ram,
-    Mmm01RamBattery,
-    Mbc3,
-    Mbc3TimerBattery,
-    Mbc3TimerRamBattery,
-    Mbc3Ram,
-    Mbc3RamBattery,
-    Mbc5,
-    Mbc5Ram,
-    Mbc5RamBattery,
-    Mbc5Rumble,
-    Mbc5RumbleRam,
-    Mbc5RumbleRamBattery,
-    Mbc6,
-    Mbc7SensorRumbleRamBattery,
-    PocketCamera,
-    BandaiTama5,
-    Huc3,
-    Huc1RamBattery,
-    Tpp1,
-    Tpp1Rumble,
-    Tpp1MultiRumble,
-    Tpp1MultiRumbleRumble,
-    Tpp1Timer,
-    Tpp1TimerRumble,
-    Tpp1TimerMultiRumble,
-    Tpp1TimerMultiRumbleRumble,
-    Tpp1Battery,
-    Tpp1BatteryRumble,
-    Tpp1BatteryMultiRumble,
-    Tpp1BatteryMultiRumbleRumble,
-    Tpp1BatteryTimer,
-    Tpp1BatteryTimerRumble,
-    Tpp1BatteryTimerMultiRumble,
-    Tpp1BatteryTimerMultiRumbleRumble,
-}
-
-fn get_mbc_type_code(mbc_type: &MbcType) -> u16 {
-    match mbc_type {
-        MbcType::Rom => 0x00,
-        MbcType::RomRam => 0x08,
-        MbcType::RomRamBattery => 0x09,
-        MbcType::Mbc1 => 0x01,
-        MbcType::Mbc1Ram => 0x02,
-        MbcType::Mbc1RamBattery => 0x03,
-        MbcType::Mbc2 => 0x05,
-        MbcType::Mbc2Battery => 0x06,
-        MbcType::Mmm01 => 0x0B,
-        MbcType::Mmm01Ram => 0x0C,
-        MbcType::Mmm01RamBattery => 0x0D,
-        MbcType::Mbc3 => 0x11,
-        MbcType::Mbc3TimerBattery => 0x0F,
-        MbcType::Mbc3TimerRamBattery => 0x10,
-        MbcType::Mbc3Ram => 0x12,
-        MbcType::Mbc3RamBattery => 0x13,
-        MbcType::Mbc5 => 0x19,
-        MbcType::Mbc5Ram => 0x1A,
-        MbcType::Mbc5RamBattery => 0x1B,
-        MbcType::Mbc5Rumble => 0x1C,
-        MbcType::Mbc5RumbleRam => 0x1D,
-        MbcType::Mbc5RumbleRamBattery => 0x1E,
-        MbcType::Mbc6 => 0x20,
-        MbcType::Mbc7SensorRumbleRamBattery => 0x22,
-        MbcType::PocketCamera => 0xFC,
-        MbcType::BandaiTama5 => 0xFD,
-        MbcType::Huc3 => 0xFE,
-        MbcType::Huc1RamBattery => 0xFF,
-        MbcType::Tpp1 => 0x100,
-        MbcType::Tpp1Rumble => 0x101,
-        MbcType::Tpp1MultiRumble => 0x102,
-        MbcType::Tpp1MultiRumbleRumble => 0x103,
-        MbcType::Tpp1Timer => 0x104,
-        MbcType::Tpp1TimerRumble => 0x105,
-        MbcType::Tpp1TimerMultiRumble => 0x106,
-        MbcType::Tpp1TimerMultiRumbleRumble => 0x107,
-        MbcType::Tpp1Battery => 0x108,
-        MbcType::Tpp1BatteryRumble => 0x109,
-        MbcType::Tpp1BatteryMultiRumble => 0x10A,
-        MbcType::Tpp1BatteryMultiRumbleRumble => 0x10B,
-        MbcType::Tpp1BatteryTimer => 0x10C,
-        MbcType::Tpp1BatteryTimerRumble => 0x10D,
-        MbcType::Tpp1BatteryTimerMultiRumble => 0x10E,
-        MbcType::Tpp1BatteryTimerMultiRumbleRumble => 0x10F,
-    }
-}
-
-fn get_mbc_enum(mbc_type: u16) -> MbcType {
-    match mbc_type {
-        0x00 => MbcType::Rom,
-        0x08 => MbcType::RomRam,
-        0x09 => MbcType::RomRamBattery,
-        0x01 => MbcType::Mbc1,
-        0x02 => MbcType::Mbc1Ram,
-        0x03 => MbcType::Mbc1RamBattery,
-        0x05 => MbcType::Mbc2,
-        0x06 => MbcType::Mbc2Battery,
-        0x0B => MbcType::Mmm01,
-        0x0C => MbcType::Mmm01Ram,
-        0x0D => MbcType::Mmm01RamBattery,
-        0x11 => MbcType::Mbc3,
-        0x0F => MbcType::Mbc3TimerBattery,
-        0x10 => MbcType::Mbc3TimerRamBattery,
-        0x12 => MbcType::Mbc3Ram,
-        0x13 => MbcType::Mbc3RamBattery,
-        0x19 => MbcType::Mbc5,
-        0x1A => MbcType::Mbc5Ram,
-        0x1B => MbcType::Mbc5RamBattery,
-        0x1C => MbcType::Mbc5Rumble,
-        0x1D => MbcType::Mbc5RumbleRam,
-        0x1E => MbcType::Mbc5RumbleRamBattery,
-        0x20 => MbcType::Mbc6,
-        0x22 => MbcType::Mbc7SensorRumbleRamBattery,
-        0xFC => MbcType::PocketCamera,
-        0xFD => MbcType::BandaiTama5,
-        0xFE => MbcType::Huc3,
-        0xFF => MbcType::Huc1RamBattery,
-        0x100 => MbcType::Tpp1,
-        0x101 => MbcType::Tpp1Rumble,
-        0x102 => MbcType::Tpp1MultiRumble,
-        0x103 => MbcType::Tpp1MultiRumbleRumble,
-        0x104 => MbcType::Tpp1Timer,
-        0x105 => MbcType::Tpp1TimerRumble,
-        0x106 => MbcType::Tpp1TimerMultiRumble,
-        0x107 => MbcType::Tpp1TimerMultiRumbleRumble,
-        0x108 => MbcType::Tpp1Battery,
-        0x109 => MbcType::Tpp1BatteryRumble,
-        0x10A => MbcType::Tpp1BatteryMultiRumble,
-        0x10B => MbcType::Tpp1BatteryMultiRumbleRumble,
-        0x10C => MbcType::Tpp1BatteryTimer,
-        0x10D => MbcType::Tpp1BatteryTimerRumble,
-        0x10E => MbcType::Tpp1BatteryTimerMultiRumble,
-        0x10F => MbcType::Tpp1BatteryTimerMultiRumbleRumble,
-        _ => {
-            eprintln!("Invalid MbcType.");
-            process::exit(1);
+        // TODO: [0] is dubious, are multiple files getting fixed in one CLI call possible?
+        if let Err(msg) = process_filename(&cli.files[0], cli_options) {
+            eprintln!("{msg}");
         }
     }
 }
 
-fn is_tpp1_type(mbc_type: &Option<MbcType>) -> bool {
-    let mbc_type = if mbc_type.is_none() {
-        return false; 
-    }
-    else {
-        mbc_type.clone().unwrap()
+/// For cartridges with optional RAM and an optional battery.
+///
+/// You cannot have a battery but no RAM.
+#[derive(Clone, Debug, Copy, PartialEq, Eq)]
+enum RamBattery {
+    Ram,
+    RamBattery,
+}
+
+#[derive(Clone, Debug, Copy, PartialEq, Eq)]
+enum Mbc3Opts {
+    /// Timers always have batteries.
+    Timer {
+        ram: bool,
+    },
+    Ram {
+        battery: bool,
+    },
+}
+
+#[derive(Clone, Debug, Copy, PartialEq, Eq)]
+enum Mbc5Opts {
+    Ram { battery: bool },
+    Rumble(Option<RamBattery>),
+}
+
+#[derive(Clone, Debug, Copy, PartialEq, Eq)]
+enum MbcType {
+    Rom(Option<RamBattery>),
+    Mbc1(Option<RamBattery>),
+    Mbc2 {
+        battery: bool,
+    },
+    Mmm01(Option<RamBattery>),
+    Mbc3(Option<Mbc3Opts>),
+    Mbc5(Option<Mbc5Opts>),
+    Mbc6,
+    Mbc7,
+    PocketCamera,
+    BandaiTama5,
+    Huc3,
+    Huc1,
+    Tpp1 {
+        rumble: bool,
+        multi_rumble: bool,
+        timer: bool,
+        battery: bool,
+    },
+}
+
+macro_rules! define_codes {
+    ($(($code:expr, $name:expr) => $value:tt),+) => {
+        impl MbcType {
+            fn to_code(self) -> u16 {
+                type M = MbcType;
+                type R = RamBattery;
+                #[allow(unused_parens)]
+                match self {
+                    $($value => $code,)+
+                }
+            }
+
+            fn from_code(mbc_type: u16) -> MbcType {
+                type M = MbcType;
+                type R = RamBattery;
+                #[allow(unused_parens)]
+                match mbc_type {
+                    $($code => $value,)+
+                    _ => todo!(),
+                }
+            }
+
+            #[allow(unused)]
+            fn get_name(self) -> &'static str {
+                type M = MbcType;
+                type R = RamBattery;
+                #[allow(unused_parens)]
+                match self {
+                    $($value => $name,)+
+                }
+            }
+        }
     };
-    match mbc_type {
-        MbcType::Tpp1Rumble |
-        MbcType::Tpp1MultiRumble |
-        MbcType::Tpp1MultiRumbleRumble |
-        MbcType::Tpp1Timer |
-        MbcType::Tpp1TimerRumble |
-        MbcType::Tpp1TimerMultiRumble |
-        MbcType::Tpp1TimerMultiRumbleRumble |
-        MbcType::Tpp1Battery |
-        MbcType::Tpp1BatteryRumble |
-        MbcType::Tpp1BatteryMultiRumble |
-        MbcType::Tpp1BatteryMultiRumbleRumble |
-        MbcType::Tpp1BatteryTimer |
-        MbcType::Tpp1BatteryTimerRumble |
-        MbcType::Tpp1BatteryTimerMultiRumble |
-        MbcType::Tpp1BatteryTimerMultiRumbleRumble => true,
-        _ => false,
+}
+
+define_codes! {
+    (0x00, "ROM") => (M::Rom(None)),
+    (0x08, "ROM+RAM") => (M::Rom(Some(R::Ram))),
+    (0x09, "ROM+RAM+BATTERY") => (M::Rom(Some(R::RamBattery))),
+    (0x01, "MBC1") => (M::Mbc1(None)),
+    (0x02, "MBC1+RAM") => (M::Mbc1(Some(R::Ram))),
+    (0x03, "MBC1+RAM+BATTERY") => (M::Mbc1(Some(R::RamBattery))),
+    (0x05, "MBC2") => (M::Mbc2 { battery: false }),
+    (0x06, "MBC2+BATTERY") => (M::Mbc2 { battery: true }),
+    (0x0B, "MMM01") => (M::Mmm01(None)),
+    (0x0C, "MMM01+RAM") => (M::Mmm01(Some(R::Ram))),
+    (0x0D, "MMM01+RAM+BATTERY") => (M::Mmm01(Some(R::RamBattery))),
+    (0x11, "MBC3") => (M::Mbc3(None)),
+    (0x0F, "MBC3+TIMER+BATTERY") => (M::Mbc3(Some(Mbc3Opts::Timer { ram: false }))),
+    (0x10, "MBC3+TIMER+RAM+BATTERY") => (M::Mbc3(Some(Mbc3Opts::Timer { ram: true }))),
+    (0x12, "MBC3+RAM") => (M::Mbc3(Some(Mbc3Opts::Ram { battery: false }))),
+    (0x13, "MBC3+RAM+BATTERY") => (M::Mbc3(Some(Mbc3Opts::Ram { battery: true }))),
+    (0x19, "MBC5") => (M::Mbc5(None)),
+    (0x1A, "MBC5+RAM") => (M::Mbc5(Some(Mbc5Opts::Ram { battery: false }))),
+    (0x1B, "MBC5+RAM+BATTERY") => (M::Mbc5(Some(Mbc5Opts::Ram { battery: true }))),
+    (0x1C, "MBC5+RUMBLE") => (M::Mbc5(Some(Mbc5Opts::Rumble(None)))),
+    (0x1D, "MBC5+RUMBLE+RAM") => (M::Mbc5(Some(Mbc5Opts::Rumble(Some(R::Ram))))),
+    (0x1E, "MBC5+RUMBLE+RAM+BATTERY") => (M::Mbc5(Some(Mbc5Opts::Rumble(Some(R::RamBattery))))),
+    (0x20, "MBC6") => (M::Mbc6),
+    (0x22, "MBC7+SENSOR+RUMBLE+RAM+BATTERY") => (M::Mbc7),
+    (0xFC, "POCKET CAMERA") => (M::PocketCamera),
+    (0xFD, "BANDAI TAMA5") => (M::BandaiTama5),
+    (0xFE, "HUC3") => (M::Huc3),
+    (0xFF, "HUC1+RAM+BATTERY") => (M::Huc1),
+    (0x100, "TPP1") => (M::Tpp1 {
+        rumble: false,
+        multi_rumble: false,
+        timer: false,
+        battery: false,
+    }),
+    (0x101, "TPP1+RUMBLE") => (M::Tpp1 {
+        rumble: true,
+        multi_rumble: false,
+        timer: false,
+        battery: false,
+    }),
+    (0x102, "TPP1+MULTIRUMBLE") => (M::Tpp1 {
+        rumble: false,
+        multi_rumble: true,
+        timer: false,
+        battery: false,
+    }),
+    (0x103, "TPP1+MULTIRUMBLE") => (M::Tpp1 {
+        rumble: true,
+        multi_rumble: true,
+        timer: false,
+        battery: false,
+    }),
+    (0x104, "TPP1+TIMER") => (M::Tpp1 {
+        rumble: false,
+        multi_rumble: false,
+        timer: true,
+        battery: false,
+    }),
+    (0x105, "TPP1+TIMER+RUMBLE") => (M::Tpp1 {
+        rumble: true,
+        multi_rumble: false,
+        timer: true,
+        battery: false,
+    }),
+    (0x106, "TPP1+TIMER+MULTIRUMBLE") => (M::Tpp1 {
+        rumble: false,
+        multi_rumble: true,
+        timer: true,
+        battery: false,
+    }),
+    (0x107, "TPP1+TIMER+MULTIRUMBLE") => (M::Tpp1 {
+        rumble: true,
+        multi_rumble: true,
+        timer: true,
+        battery: false,
+    }),
+    (0x108, "TPP1+BATTERY") => (M::Tpp1 {
+        rumble: false,
+        multi_rumble: false,
+        timer: false,
+        battery: true,
+    }),
+    (0x109, "TPP1+BATTERY+RUMBLE") => (M::Tpp1 {
+        rumble: true,
+        multi_rumble: false,
+        timer: false,
+        battery: true,
+    }),
+    (0x10A, "TPP1+BATTERY+MULTIRUMBLE") => (M::Tpp1 {
+        rumble: false,
+        multi_rumble: true,
+        timer: false,
+        battery: true,
+    }),
+    (0x10B, "TPP1+BATTERY+MULTIRUMBLE") => (M::Tpp1 {
+        rumble: true,
+        multi_rumble: true,
+        timer: false,
+        battery: true,
+    }),
+    (0x10C, "TPP1+BATTERY+TIMER") => (M::Tpp1 {
+        rumble: false,
+        multi_rumble: false,
+        timer: true,
+        battery: true,
+    }),
+    (0x10D, "TPP1+BATTERY+TIMER+RUMBLE") => (M::Tpp1 {
+        rumble: true,
+        multi_rumble: false,
+        timer: true,
+        battery: true,
+    }),
+    (0x10E, "TPP1+BATTERY+TIMER+MULTIRUMBLE") => (M::Tpp1 {
+        rumble: false,
+        multi_rumble: true,
+        timer: true,
+        battery: true,
+    }),
+    (0x10F, "TPP1+BATTERY+TIMER+MULTIRUMBLE") => (M::Tpp1 {
+        rumble: true,
+        multi_rumble: true,
+        timer: true,
+        battery: true,
+    })
+}
+
+impl MbcType {
+    #[allow(unused)]
+    fn has_ram(self) -> Option<bool> {
+        match self {
+            MbcType::Rom(None)
+            | MbcType::Mbc1(None)
+            | MbcType::Mmm01(None)
+            | MbcType::Mbc3(None)
+            | MbcType::Mbc2 { .. }
+            | MbcType::Mbc3(Some(Mbc3Opts::Timer { ram: false }))
+            | MbcType::Mbc5(None)
+            | MbcType::Mbc5(Some(Mbc5Opts::Rumble(None)))
+            | MbcType::Mbc6
+            | MbcType::BandaiTama5 => Some(false),
+
+            MbcType::Rom(Some(_))
+            | MbcType::Mbc1(Some(_))
+            | MbcType::Mmm01(Some(_))
+            | MbcType::Mbc3(Some(Mbc3Opts::Timer { ram: true }))
+            | MbcType::Mbc3(Some(Mbc3Opts::Ram { .. }))
+            | MbcType::Mbc5(Some(Mbc5Opts::Ram { .. }))
+            | MbcType::Mbc5(Some(Mbc5Opts::Rumble(Some(_))))
+            | MbcType::Mbc7
+            | MbcType::PocketCamera
+            | MbcType::Huc3
+            | MbcType::Huc1 => Some(true),
+
+            MbcType::Tpp1 { .. } => None,
+        }
     }
 }
 
-fn mbc_has_ram(mbc_type: &MbcType) -> Option<bool> {
-    match mbc_type {
-        MbcType::Rom
-        | MbcType::Mbc1
-        | MbcType::Mbc2
-        | MbcType::Mbc2Battery
-        | MbcType::Mmm01
-        | MbcType::Mbc3
-        | MbcType::Mbc3TimerBattery
-        | MbcType::Mbc5
-        | MbcType::Mbc5Rumble
-        | MbcType::Mbc6
-        | MbcType::BandaiTama5 => Some(false),
-        MbcType::RomRam
-        | MbcType::RomRamBattery
-        | MbcType::Mbc1Ram
-        | MbcType::Mbc1RamBattery
-        | MbcType::Mmm01Ram
-        | MbcType::Mmm01RamBattery
-        | MbcType::Mbc3TimerRamBattery
-        | MbcType::Mbc3Ram
-        | MbcType::Mbc3RamBattery
-        | MbcType::Mbc5Ram
-        | MbcType::Mbc5RamBattery
-        | MbcType::Mbc5RumbleRam
-        | MbcType::Mbc5RumbleRamBattery
-        | MbcType::Mbc7SensorRumbleRamBattery
-        | MbcType::PocketCamera
-        | MbcType::Huc3
-        | MbcType::Huc1RamBattery => Some(true),
-        // TPP1 may or may not have RAM, return None for it
-        MbcType::Tpp1
-        | MbcType::Tpp1Rumble
-        | MbcType::Tpp1MultiRumble
-        | MbcType::Tpp1MultiRumbleRumble
-        | MbcType::Tpp1Timer
-        | MbcType::Tpp1TimerRumble
-        | MbcType::Tpp1TimerMultiRumble
-        | MbcType::Tpp1TimerMultiRumbleRumble
-        | MbcType::Tpp1Battery
-        | MbcType::Tpp1BatteryRumble
-        | MbcType::Tpp1BatteryMultiRumble
-        | MbcType::Tpp1BatteryMultiRumbleRumble
-        | MbcType::Tpp1BatteryTimer
-        | MbcType::Tpp1BatteryTimerRumble
-        | MbcType::Tpp1BatteryTimerMultiRumble
-        | MbcType::Tpp1BatteryTimerMultiRumbleRumble => None,
-    }
-}
-
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error, Clone, Copy)]
 enum ParseError {
+    #[error("unknown format")]
     Bad,
+    #[error("outside of accepted range")]
     BadRange,
 }
 
@@ -583,11 +618,12 @@ impl FromStr for MbcType {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if s.chars().next().unwrap().is_ascii_digit() || s.starts_with('$') {
             let base = if s.starts_with('$') { 16 } else { 10 };
-            let mbc = u16::from_str_radix(s.trim_start_matches('$'), base).map_err(|_| ParseError::Bad)?;
+            let mbc = u16::from_str_radix(s.trim_start_matches('$'), base)
+                .map_err(|_| ParseError::Bad)?;
             if mbc > 0xFF {
                 return Err(ParseError::BadRange);
             }
-            return Ok(get_mbc_enum(mbc));
+            return Ok(MbcType::from_code(mbc));
         }
 
         Err(ParseError::Bad)
@@ -618,7 +654,7 @@ fn read_bytes<R: Read>(fd: &mut R, mut buf: &mut [u8]) -> io::Result<usize> {
                 total += n;
                 let tmp = buf;
                 buf = &mut tmp[n..];
-            },
+            }
             Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
             Err(e) => return Err(e),
         }
@@ -655,7 +691,13 @@ fn write_bytes(file: &mut File, buf: &[u8]) -> io::Result<usize> {
     Ok(total)
 }
 
-fn overwrite_byte(rom0: &mut [u8], addr: u16, fixed_byte: u8, area_name: &str, overwrite_rom: bool) {
+fn overwrite_byte(
+    rom0: &mut [u8],
+    addr: u16,
+    fixed_byte: u8,
+    area_name: &str,
+    overwrite_rom: bool,
+) {
     let orig_byte = rom0[addr as usize];
 
     if !overwrite_rom && orig_byte != 0 && orig_byte != fixed_byte {
@@ -665,9 +707,18 @@ fn overwrite_byte(rom0: &mut [u8], addr: u16, fixed_byte: u8, area_name: &str, o
     rom0[addr as usize] = fixed_byte;
 }
 
-fn overwrite_bytes(rom0: &mut [u8], start_addr: u16, fixed: &[u8], area_name: &str, overwrite_rom: bool) -> io::Result<()> {
+fn overwrite_bytes(
+    rom0: &mut [u8],
+    start_addr: u16,
+    fixed: &[u8],
+    area_name: &str,
+    overwrite_rom: bool,
+) -> io::Result<()> {
     if start_addr as usize + fixed.len() > rom0.len() {
-        return Err(io::Error::new(io::ErrorKind::InvalidInput, "Address or size out of bounds"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "Address or size out of bounds",
+        ));
     }
     if !overwrite_rom {
         for (i, &byte) in fixed.iter().enumerate() {
@@ -681,111 +732,222 @@ fn overwrite_bytes(rom0: &mut [u8], start_addr: u16, fixed: &[u8], area_name: &s
     Ok(())
 }
 
-fn process_file(input: &mut File, output: &mut File, name: &str, file_size: u64, options: CliOptions) -> io::Result<()> {
+fn process_file(
+    input: &mut File,
+    output: &mut File,
+    name: &str,
+    file_size: u64,
+    options: CliOptions,
+) -> io::Result<()> {
     // Check if the file is seekable
-    if true || input.as_raw_fd() == output.as_raw_fd() { // TOCHECK: I have no idea what these checks are doing, so I disabled them. Check this.
+    /* TODO: I have no idea what these checks are doing, so I disabled them. Check this.
+    if input.as_raw_fd() == output.as_raw_fd() {
         assert!(file_size != 0);
     } else {
         assert!(file_size == 0);
     }
+    */
 
     let mut rom0 = [0u8; BANK_SIZE];
     let mut rom0_len = match read_bytes(input, &mut rom0) {
         Ok(corr_len) => corr_len,
-        Err(_e) => { 
-            eprintln!("Invalid file input."); 
-            process::exit(1); 
+        Err(e) => {
+            eprintln!("Invalid file input: {e}");
+            process::exit(1);
         }
     };
-    
-    let header_size = if is_tpp1_type(&options.cartridge_type) { 0x154 } else { 0x150 };
 
-    if rom0_len < header_size as usize {
-        eprintln!("FATAL: \"{}\" too short, expected at least {} bytes, got only {}",
-                 name, header_size, rom0_len);
-        return Err(io::Error::new(io::ErrorKind::InvalidInput, "File too short"));
-    }
-
-    let _ = match options.fix_spec.logo {
-        Some(FixState::Fix) => overwrite_bytes(&mut rom0, 0x0104, &NINTENDO_LOGO, "Nintendo logo", options.overwrite_rom),
-        Some(FixState::Trash) => overwrite_bytes(&mut rom0, 0x0104, &TRASH_LOGO, "Nintendo logo", options.overwrite_rom),
-        None => Ok (()),
+    let header_size = if matches!(&options.cartridge_type, Some(MbcType::Tpp1 { .. })) {
+        0x154
+    } else {
+        0x150
     };
 
+    if rom0_len < header_size {
+        eprintln!(
+            "FATAL: \"{}\" too short, expected at least {} bytes, got only {}",
+            name, header_size, rom0_len
+        );
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "File too short",
+        ));
+    }
+
+    match options.fix_spec.logo {
+        Some(FixState::Fix) => overwrite_bytes(
+            &mut rom0,
+            0x0104,
+            &NINTENDO_LOGO,
+            "Nintendo logo",
+            options.overwrite_rom,
+        )?,
+        Some(FixState::Trash) => overwrite_bytes(
+            &mut rom0,
+            0x0104,
+            &TRASH_LOGO,
+            "Nintendo logo",
+            options.overwrite_rom,
+        )?,
+        None => (),
+    }
+
     if let Some(title) = options.title {
-        overwrite_bytes(&mut rom0[..], 0x134, title.as_bytes(), "title", options.overwrite_rom)?;
+        overwrite_bytes(
+            &mut rom0[..],
+            0x134,
+            title.as_bytes(),
+            "title",
+            options.overwrite_rom,
+        )?;
     }
 
     if let Some(game_id) = options.game_id {
-        let _ = overwrite_bytes(&mut rom0[..], 0x13F, game_id.as_bytes(), "manufacturer code", options.overwrite_rom);
+        overwrite_bytes(
+            &mut rom0[..],
+            0x13F,
+            game_id.as_bytes(),
+            "manufacturer code",
+            options.overwrite_rom,
+        )?;
     }
 
     if !matches!(options.model, Model::Dmg) {
-        match options.model {  
-            Model::Both => overwrite_byte(&mut rom0, 0x143, 0x80, "Cgb flag", options.overwrite_rom),  
-            Model::Cgb => overwrite_byte(&mut rom0, 0x143, 0xC0, "Cgb flag", options.overwrite_rom),  
-            Model::Dmg => (),  
-        };  
+        match options.model {
+            Model::Both => {
+                overwrite_byte(&mut rom0, 0x143, 0x80, "Cgb flag", options.overwrite_rom)
+            }
+            Model::Cgb => overwrite_byte(&mut rom0, 0x143, 0xC0, "Cgb flag", options.overwrite_rom),
+            Model::Dmg => (),
+        };
     };
 
     if let Some(new_licensee) = options.new_licensee {
-        let _ = overwrite_bytes(&mut rom0[..], 0x144, new_licensee.as_bytes(), "new licensee code", options.overwrite_rom);
+        overwrite_bytes(
+            &mut rom0[..],
+            0x144,
+            new_licensee.as_bytes(),
+            "new licensee code",
+            options.overwrite_rom,
+        )?;
     }
 
     if options.sgb {
-        let _ = overwrite_byte(&mut rom0[..], 0x146, 0x03, "SGB flag", options.overwrite_rom);
+        overwrite_byte(
+            &mut rom0[..],
+            0x146,
+            0x03,
+            "SGB flag",
+            options.overwrite_rom,
+        );
     }
 
     let ram_size = options.ram_size;
 
     if let Some(ref cartridge_type) = options.cartridge_type {
-        let mut byte = cartridge_type.clone() as u8;
-
-        if is_tpp1_type(&Some(cartridge_type.clone())) {
-            // Cartridge type isn't directly actionable, translate it
-            byte = 0xBC;
+        let byte = cartridge_type.to_code().try_into().unwrap_or(
+            // Out-of-range cartridge bytes aren't directly actionable, translate them.
             // The other TPP1 identification bytes will be written below
-        }
-        overwrite_byte(&mut rom0[..], 0x147, byte, "cartridge type", options.overwrite_rom);
+            0xBC,
+        );
+
+        overwrite_byte(
+            &mut rom0[..],
+            0x147,
+            byte,
+            "cartridge type",
+            options.overwrite_rom,
+        );
     }
 
     // ROM size will be written last, after evaluating the file's size
-    
-    if is_tpp1_type(&options.cartridge_type) {
-        let cartridge_type = &options.cartridge_type.clone().unwrap(); // safe because it passed is_tpp1_type
+
+    if let Some(cartridge_type @ MbcType::Tpp1 { .. }) = options.cartridge_type {
         let tpp1_code = vec![0xC1, 0x65];
         let tpp1_rev = vec![0xC1, 0x65]; // TODO WARNING PLACEHOLDER NOT ACTUAL VALUES, PICK UP FROM OPTIONS INSTEAD?
 
         // TODO: I don't understand this part. Tpp1_rev comes from tryReadSlice and I still don't understand very well what it does.
-        let _ = overwrite_bytes(&mut rom0[..], 0x149, &tpp1_code, "TPP1 identification code", options.overwrite_rom);
+        overwrite_bytes(
+            &mut rom0[..],
+            0x149,
+            &tpp1_code,
+            "TPP1 identification code",
+            options.overwrite_rom,
+        )?;
 
-        let _ = overwrite_bytes(&mut rom0[..], 0x150, &tpp1_rev, "TPP1 revision number", options.overwrite_rom);
+        overwrite_bytes(
+            &mut rom0[..],
+            0x150,
+            &tpp1_rev,
+            "TPP1 revision number",
+            options.overwrite_rom,
+        )?;
 
         if let Some(ram_size) = ram_size {
-            overwrite_byte(&mut rom0[..], 0x152, ram_size as u8, "RAM size", options.overwrite_rom);
+            overwrite_byte(
+                &mut rom0[..],
+                0x152,
+                ram_size,
+                "RAM size",
+                options.overwrite_rom,
+            );
         }
 
-        overwrite_byte(&mut rom0[..], 0x153, (get_mbc_type_code(cartridge_type) & 0xFF) as u8, "TPP1 feature flags", options.overwrite_rom);
+        overwrite_byte(
+            &mut rom0[..],
+            0x153,
+            // This truncates and that's fine.
+            cartridge_type.to_code() as u8,
+            "TPP1 feature flags",
+            options.overwrite_rom,
+        );
     } else {
         // Regular mappers
 
         if let Some(ram_size) = ram_size {
-            overwrite_byte(&mut rom0[..], 0x149, ram_size as u8, "RAM size", options.overwrite_rom);
+            overwrite_byte(
+                &mut rom0[..],
+                0x149,
+                ram_size,
+                "RAM size",
+                options.overwrite_rom,
+            );
         }
 
         if !options.japanese {
-            overwrite_byte(&mut rom0[..], 0x14A, 0x01, "destination code", options.overwrite_rom);
+            overwrite_byte(
+                &mut rom0[..],
+                0x14A,
+                0x01,
+                "destination code",
+                options.overwrite_rom,
+            );
         }
     }
 
     if let Some(old_licensee) = options.old_licensee {
-        overwrite_byte(&mut rom0[..], 0x14B, old_licensee as u8, "old licensee code", options.overwrite_rom);
+        overwrite_byte(
+            &mut rom0[..],
+            0x14B,
+            old_licensee,
+            "old licensee code",
+            options.overwrite_rom,
+        );
     } else if options.sgb && rom0[0x14B] != 0x33 {
-        eprintln!("warning: SGB compatibility enabled, but old licensee was 0x{:02x}, not 0x33", rom0[0x14B]);
+        eprintln!(
+            "warning: SGB compatibility enabled, but old licensee was 0x{:02x}, not 0x33",
+            rom0[0x14B]
+        );
     }
-    
+
     if let Some(rom_version) = options.rom_version {
-        overwrite_byte(&mut rom0[..], 0x14C, rom_version as u8, "mask ROM version number", options.overwrite_rom);
+        overwrite_byte(
+            &mut rom0[..],
+            0x14C,
+            rom_version,
+            "mask ROM version number",
+            options.overwrite_rom,
+        );
     }
 
     let mut romx: Vec<u8> = Vec::new(); // Buffer of ROMX bank data
@@ -795,7 +957,7 @@ fn process_file(input: &mut File, output: &mut File, name: &str, file_size: u64,
     let mut global_sum: u16 = 0; // Global checksum variable
 
     // Handle ROMX
-    if true || input.as_raw_fd() == output.as_raw_fd() {
+    if input.as_raw_fd() == output.as_raw_fd() {
         if file_size >= (0x10000 * BANK_SIZE) as u64 {
             eprintln!("FATAL: \"{}\" has more than 65536 banks", name);
             return Ok(());
@@ -806,12 +968,19 @@ fn process_file(input: &mut File, output: &mut File, name: &str, file_size: u64,
         // const _: () = assert!(0x10000 * BANK_SIZE <= std::mem::size_of::<usize>());
         // Compute number of banks and ROMX len from file size
         nb_banks = ((file_size + (BANK_SIZE - 1) as u64) / BANK_SIZE as u64) as u32;
-        total_romx_len = if file_size >= BANK_SIZE as u64 { (file_size - BANK_SIZE as u64) as usize } else { 0 };
+        total_romx_len = if file_size >= BANK_SIZE as u64 {
+            (file_size - BANK_SIZE as u64) as usize
+        } else {
+            0
+        };
     } else if rom0_len == BANK_SIZE {
         // Copy ROMX when reading a pipe, and we're not at EOF yet
         loop {
             romx.resize((nb_banks * BANK_SIZE as u32) as usize, 0); // Initialize new elements to 0
-            let bank_len = read_bytes(input, &mut romx[((nb_banks - 1) * BANK_SIZE as u32) as usize..])?;
+            let bank_len = read_bytes(
+                input,
+                &mut romx[((nb_banks - 1) * BANK_SIZE as u32) as usize..],
+            )?;
 
             // Update bank count, ONLY IF at least one byte was read
             if bank_len > 0 {
@@ -842,8 +1011,8 @@ fn process_file(input: &mut File, output: &mut File, name: &str, file_size: u64,
         if nb_banks == 1 {
             if rom0_len != rom0.len() {
                 // Fill the remaining space in rom0 with pad_value
-                for i in rom0_len..rom0.len() {
-                    rom0[i] = pad_value as u8;
+                for i in rom0.iter_mut().skip(rom0_len) {
+                    *i = pad_value;
                 }
                 // Update rom0Len to reflect the full size of rom0
                 rom0_len = rom0.len();
@@ -858,7 +1027,7 @@ fn process_file(input: &mut File, output: &mut File, name: &str, file_size: u64,
         // so this is true (non-zero) when we don't have a power of 2
         if !nb_banks.is_power_of_two() {
             nb_banks = nb_banks.next_power_of_two();
-        }        
+        }
         // Write final ROM size
         rom0[0x148] = (nb_banks / 2).trailing_zeros() as u8;
         // Alter global checksum based on how many bytes will be added (not counting ROM0)
@@ -870,30 +1039,38 @@ fn process_file(input: &mut File, output: &mut File, name: &str, file_size: u64,
 
     // Handle the header checksum after the ROM size has been written
     if options.fix_spec.header.is_some() {
-        let mut sum: u8 = 0;
-
-        for i in 0x134..0x14D {
-            sum = sum.wrapping_sub(rom0[i] + 1);
-        }
-
-        overwrite_byte(&mut rom0, 0x14D, if matches!(options.fix_spec.header, Some(FixState::Trash)) { !sum } else { sum }, "header checksum", options.overwrite_rom);
+        let sum = rom0[0x134..0x14D]
+            .iter()
+            .fold(0u8, |a, i| a.wrapping_sub(i + 1));
+        overwrite_byte(
+            &mut rom0,
+            0x14D,
+            if matches!(options.fix_spec.header, Some(FixState::Trash)) {
+                !sum
+            } else {
+                sum
+            },
+            "header checksum",
+            options.overwrite_rom,
+        );
     }
 
-    if options.fix_spec.global.is_some() { 
+    if options.fix_spec.global.is_some() {
+        // TODO: Why is this an assert? shouldn't this be a runtime error?
         assert!(rom0_len >= 0x14E, "ROM0 length must be at least 0x14E");
-        for i in 0..0x14E {
-            global_sum = global_sum.wrapping_add(rom0[i] as u16);
+        for i in rom0.into_iter().take(0x14E) {
+            global_sum = global_sum.wrapping_add(i as u16);
         }
-        for i in 0x150..rom0_len {
-            global_sum = global_sum.wrapping_add(rom0[i] as u16);
+        for i in rom0[0..0x14E].iter().chain(rom0[0x150..rom0_len].iter()) {
+            global_sum = global_sum.wrapping_add(*i as u16);
         }
         // Pipes have already read ROMX and updated global_sum, but not regular files
-        if true || input.as_raw_fd() == output.as_raw_fd() {
+        if input.as_raw_fd() == output.as_raw_fd() {
             loop {
                 let bank_len = read_bytes(input, &mut bank)?;
 
-                for i in 0..bank_len {
-                    global_sum = global_sum.wrapping_add(bank[i] as u16);
+                for i in bank.into_iter().take(bank_len) {
+                    global_sum = global_sum.wrapping_add(i as u16);
                 }
                 if bank_len != BANK_SIZE {
                     break;
@@ -907,14 +1084,20 @@ fn process_file(input: &mut File, output: &mut File, name: &str, file_size: u64,
 
         let bytes = global_sum.to_be_bytes();
 
-        let _ = overwrite_bytes(&mut rom0, 0x14E, &bytes, "global checksum", options.overwrite_rom);
+        overwrite_bytes(
+            &mut rom0,
+            0x14E,
+            &bytes,
+            "global checksum",
+            options.overwrite_rom,
+        )?;
     }
 
     let mut write_len: usize;
 
     // In case the output depends on the input, reset to the beginning of the file, and only
     // write the header
-    if true || input.as_raw_fd() == output.as_raw_fd() {
+    if input.as_raw_fd() == output.as_raw_fd() {
         if let Err(e) = output.seek(io::SeekFrom::Start(0)) {
             eprintln!("FATAL: Failed to rewind \"{}\": {}", name, e);
             return Ok(());
@@ -925,12 +1108,14 @@ fn process_file(input: &mut File, output: &mut File, name: &str, file_size: u64,
             rom0_len = header_size;
         }
     }
-    
+
     write_len = write_bytes(output, &rom0[..rom0_len])?;
 
     if (write_len) < rom0_len {
-        eprintln!("FATAL: Could only write {} of \"{}\"'s {} ROM0 bytes",
-            write_len, name, rom0_len);
+        eprintln!(
+            "FATAL: Could only write {} of \"{}\"'s {} ROM0 bytes",
+            write_len, name, rom0_len
+        );
         return Err(io::Error::new(io::ErrorKind::UnexpectedEof, ""));
     }
 
@@ -938,15 +1123,17 @@ fn process_file(input: &mut File, output: &mut File, name: &str, file_size: u64,
     if !romx.is_empty() {
         write_len = write_bytes(output, &romx[..total_romx_len])?;
         if (write_len) < total_romx_len {
-            eprintln!("FATAL: Could only write {} of \"{}\"'s {} ROMX bytes",
-                write_len, name, total_romx_len);
+            eprintln!(
+                "FATAL: Could only write {} of \"{}\"'s {} ROMX bytes",
+                write_len, name, total_romx_len
+            );
             return Err(io::Error::new(io::ErrorKind::UnexpectedEof, ""));
         }
     }
 
     // Output padding
     if options.pad_value.is_some() {
-        if true || input.as_raw_fd() == output.as_raw_fd() {
+        if input.as_raw_fd() == output.as_raw_fd() {
             if let Err(e) = output.seek(io::SeekFrom::End(0)) {
                 eprintln!("FATAL: Failed to seek to end of \"{}\": {}", name, e);
                 return Err(io::Error::new(io::ErrorKind::InvalidInput, ""));
@@ -956,40 +1143,49 @@ fn process_file(input: &mut File, output: &mut File, name: &str, file_size: u64,
         let mut len = (nb_banks - 1) * BANK_SIZE as u32 - total_romx_len as u32; // Don't count ROM0!
 
         while len > 0 {
-            let this_len = if len > BANK_SIZE as u32 { BANK_SIZE } else { len as usize };
+            let this_len = if len > BANK_SIZE as u32 {
+                BANK_SIZE
+            } else {
+                len as usize
+            };
             write_len = write_bytes(output, &bank[..this_len])?;
 
-            if write_len as usize != this_len {
-                eprintln!("FATAL: Failed to write \"{}\"'s padding: {}", name, io::Error::last_os_error());
+            if write_len != this_len {
+                eprintln!(
+                    "FATAL: Failed to write \"{}\"'s padding: {}",
+                    name,
+                    io::Error::last_os_error()
+                );
                 break;
             }
             len -= this_len as u32;
         }
     }
 
-    
     Ok(())
 }
 
 fn process_filename(name: &str, options: CliOptions) -> io::Result<bool> {
     let mut nb_errors = 0;
-    let mut file = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(name)?;
+    let mut file = OpenOptions::new().read(true).write(true).open(name)?;
     let mut temp_file = file.try_clone()?; //TOCHECK: This could be plain wrong, check what output file actually does in process_File
     if name == "-" {
         //TOCHECK: Make SURE only [u8] are used in processing to avoid Windows OS translating newline characters.
         process_file(&mut file, &mut temp_file, name, 0, options)?;
     } else {
-
-
         let metadata = file.metadata()?;
         if !metadata.is_file() {
-            eprintln!("FATAL: \"{}\" is not a regular file, and thus cannot be modified in-place", name);
+            eprintln!(
+                "FATAL: \"{}\" is not a regular file, and thus cannot be modified in-place",
+                name
+            );
             nb_errors += 1;
         } else if metadata.len() < 0x150 {
-            eprintln!("FATAL: \"{}\" too short, expected at least 336 ($150) bytes, got only {}", name, metadata.len());
+            eprintln!(
+                "FATAL: \"{}\" too short, expected at least 336 ($150) bytes, got only {}",
+                name,
+                metadata.len()
+            );
             nb_errors += 1;
         } else {
             process_file(&mut file, &mut temp_file, name, metadata.len(), options)?;
@@ -997,7 +1193,12 @@ fn process_filename(name: &str, options: CliOptions) -> io::Result<bool> {
     }
 
     if nb_errors > 0 {
-        eprintln!("Fixing \"{}\" failed with {} error{}", name, nb_errors, if nb_errors == 1 { "" } else { "s" });
+        eprintln!(
+            "Fixing \"{}\" failed with {} error{}",
+            name,
+            nb_errors,
+            if nb_errors == 1 { "" } else { "s" }
+        );
     }
 
     Ok(nb_errors == 0)
