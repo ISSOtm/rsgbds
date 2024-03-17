@@ -25,6 +25,7 @@ try-from-discrim = "1.0.0"
 warnings-gen = { path = "warnings-gen" }
 nix = "0.28.0"
 clap-num = "1.1.1"
+thiserror = "1.0.58"
 
 [build-dependencies]
 lalrpop = { version = "0.19.8", default-features = false }
