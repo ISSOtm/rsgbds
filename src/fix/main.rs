@@ -741,7 +741,7 @@ fn process_file(
 ) -> io::Result<()> {
     // Check if the file is seekable
     /* TODO: I have no idea what these checks are doing, so I disabled them. Check this.
-    if input.as_raw_fd() == output.as_raw_fd() {
+    if true || input.as_raw_fd() == output.as_raw_fd() {
         assert!(file_size != 0);
     } else {
         assert!(file_size == 0);
@@ -957,7 +957,7 @@ fn process_file(
     let mut global_sum: u16 = 0; // Global checksum variable
 
     // Handle ROMX
-    if input.as_raw_fd() == output.as_raw_fd() {
+    if true || input.as_raw_fd() == output.as_raw_fd() {
         if file_size >= (0x10000 * BANK_SIZE) as u64 {
             eprintln!("FATAL: \"{}\" has more than 65536 banks", name);
             return Ok(());
@@ -1058,14 +1058,11 @@ fn process_file(
     if options.fix_spec.global.is_some() {
         // TODO: Why is this an assert? shouldn't this be a runtime error?
         assert!(rom0_len >= 0x14E, "ROM0 length must be at least 0x14E");
-        for i in rom0.into_iter().take(0x14E) {
-            global_sum = global_sum.wrapping_add(i as u16);
-        }
         for i in rom0[0..0x14E].iter().chain(rom0[0x150..rom0_len].iter()) {
             global_sum = global_sum.wrapping_add(*i as u16);
         }
         // Pipes have already read ROMX and updated global_sum, but not regular files
-        if input.as_raw_fd() == output.as_raw_fd() {
+        if true || input.as_raw_fd() == output.as_raw_fd() {
             loop {
                 let bank_len = read_bytes(input, &mut bank)?;
 
@@ -1097,7 +1094,7 @@ fn process_file(
 
     // In case the output depends on the input, reset to the beginning of the file, and only
     // write the header
-    if input.as_raw_fd() == output.as_raw_fd() {
+    if true || input.as_raw_fd() == output.as_raw_fd() {
         if let Err(e) = output.seek(io::SeekFrom::Start(0)) {
             eprintln!("FATAL: Failed to rewind \"{}\": {}", name, e);
             return Ok(());
@@ -1133,7 +1130,7 @@ fn process_file(
 
     // Output padding
     if options.pad_value.is_some() {
-        if input.as_raw_fd() == output.as_raw_fd() {
+        if true || input.as_raw_fd() == output.as_raw_fd() {
             if let Err(e) = output.seek(io::SeekFrom::End(0)) {
                 eprintln!("FATAL: Failed to seek to end of \"{}\": {}", name, e);
                 return Err(io::Error::new(io::ErrorKind::InvalidInput, ""));
