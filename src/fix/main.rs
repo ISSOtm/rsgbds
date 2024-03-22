@@ -1,36 +1,90 @@
-//TODO restore cargo.toml bin before shipping
-
 use clap::Parser;
 use clap_num::maybe_hex;
 use std::fs::{File, OpenOptions};
 use std::io::{self, Read, Seek, Write};
-use std::os::unix::io::AsRawFd;
-use std::process;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
+use tracing::*;
 
 const BANK_SIZE: usize = 0x4000;
 
-#[derive(Debug, Clone)]
-pub struct CliOptions {
-    game_id: Option<String>,
-    japanese: bool,
-    new_licensee: Option<String>,
-    old_licensee: Option<u8>,
-    cartridge_type: Option<MbcType>,
-    rom_version: Option<u8>,
-    overwrite_rom: bool,
-    pad_value: Option<u8>,
-    ram_size: Option<u8>,
-    sgb: bool,
-    fix_spec: FixSpec,
-    model: Model,
-    title: Option<String>,
-    title_len: usize,
+#[derive(Debug, thiserror::Error)]
+enum Error {
+    #[error("failed to read file: {0}")]
+    Io(#[from] io::Error),
+    #[error("file too short: expected at least {expected} bytes, got only {got}")]
+    TooShort { expected: usize, got: usize },
+    #[error("not a regular file; cannot be modified in-place")]
+    IrregularFile,
+    #[error("cannot have over 65535 banks ({0})")]
+    TooManyBanks(u64),
 }
 
 #[derive(Parser, Debug)]
-#[clap(version = "1.0", about = "A tool to fix ROM files for Game Boy.")]
+#[clap(version, about = "A tool to fix ROM files for Game Boy.")]
 struct Cli {
+    #[clap(flatten)]
+    model: Model,
+
+    #[clap(short = 'f', long, value_name = "FIX_SPEC", default_value = "")]
+    /// Specify a fix specification
+    fix_spec: FixSpec,
+
+    #[clap(short = 'i', long, value_name = "GAME_ID")]
+    /// Specify a game ID
+    game_id: Option<String>,
+
+    #[clap(short = 'j', long)]
+    /// Non-Japanese mode
+    non_japanese: bool,
+
+    #[clap(short = 'k', long, value_name = "NEW_LICENSEE")]
+    /// Specify a new licensee
+    new_licensee: Option<String>,
+
+    #[clap(short = 'l', long, value_name = "OLD_LICENSEE", value_parser=maybe_hex::<u8>)]
+    /// Specify an old licensee
+    old_licensee: Option<u8>,
+
+    #[clap(short = 'm', long, value_name = "MBC_TYPE")]
+    /// Specify the MBC type
+    mbc_type: Option<MbcType>,
+
+    #[clap(short = 'n', long, value_name = "ROM_VERSION", value_parser=maybe_hex::<u8>)]
+    /// Specify the ROM version
+    rom_version: Option<u8>,
+
+    #[clap(short = 'O', long)]
+    /// Overwrite the file
+    overwrite: bool,
+
+    #[clap(short = 'p', long, value_name = "PAD_VALUE", value_parser=maybe_hex::<u8>)]
+    /// Specify the padding value
+    pad_value: Option<u8>,
+
+    #[clap(short = 'r', long, value_name = "RAM_SIZE", value_parser=maybe_hex::<u8>)]
+    /// Specify the RAM size
+    ram_size: Option<u8>,
+
+    #[clap(short = 's', long)]
+    /// SGB-compatible mode
+    sgb_compatible: bool,
+
+    #[clap(short = 't', long, value_name = "TITLE")]
+    /// Specify the title
+    title: Option<String>,
+
+    #[clap(short = 'v', long)]
+    /// Fix the header logo and both checksums (-f lhg)
+    validate: bool,
+
+    #[clap(value_name = "FILES")]
+    /// Files to process
+    files: Vec<PathBuf>,
+}
+
+#[derive(clap::Args, Debug, Clone)]
+struct Model {
     #[clap(short = 'C', long = "color-only")]
     /// Color-only mode
     color_only: bool,
@@ -38,87 +92,51 @@ struct Cli {
     #[clap(short = 'c', long = "color-compatible")]
     /// Color-compatible mode
     color_compatible: bool,
-
-    #[clap(short = 'f', long = "fix-spec", value_name = "FIX_SPEC", validator = parse_fix_spec)]
-    /// Specify a fix specification
-    fix_spec: Option<String>,
-
-    #[clap(short = 'i', long = "game-id", value_name = "GAME_ID")]
-    /// Specify a game ID
-    game_id: Option<String>,
-
-    #[clap(short = 'j', long = "non-japanese")]
-    /// Non-Japanese mode
-    non_japanese: bool,
-
-    #[clap(short = 'k', long = "new-licensee", value_name = "NEW_LICENSEE")]
-    /// Specify a new licensee
-    new_licensee: Option<String>,
-
-    #[clap(short = 'l', long = "old-licensee", value_name = "OLD_LICENSEE", value_parser=maybe_hex::<u8>)]
-    /// Specify an old licensee
-    old_licensee: Option<u8>,
-
-    #[clap(short = 'm', long = "mbc-type", value_name = "MBC_TYPE")]
-    /// Specify the MBC type
-    mbc_type: Option<String>,
-
-    #[clap(short = 'n', long = "rom-version", value_name = "ROM_VERSION", value_parser=maybe_hex::<u8>)]
-    /// Specify the ROM version
-    rom_version: Option<u8>,
-
-    #[clap(short = 'O', long = "overwrite")]
-    /// Overwrite the file
-    overwrite: bool,
-
-    #[clap(short = 'p', long = "pad-value", value_name = "PAD_VALUE", value_parser=maybe_hex::<u8>)]
-    /// Specify the padding value
-    pad_value: Option<u8>,
-
-    #[clap(short = 'r', long = "ram-size", value_name = "RAM_SIZE", value_parser=maybe_hex::<u8>)]
-    /// Specify the RAM size
-    ram_size: Option<u8>,
-
-    #[clap(short = 's', long = "sgb-compatible")]
-    /// SGB-compatible mode
-    sgb_compatible: bool,
-
-    #[clap(short = 't', long = "title", value_name = "TITLE")]
-    /// Specify the title
-    title: Option<String>,
-
-    #[clap(short = 'V', long = "version")]
-    /// Print RGBFIX version and exit
-    version: bool,
-
-    #[clap(short = 'v', long = "validate")]
-    /// Fix the header logo and both checksums (-f lhg)
-    validate: bool,
-
-    #[clap(value_name = "FILES")]
-    /// Files to process
-    files: Vec<String>,
 }
 
-fn parse_fix_spec(s: &str) -> Result<FixSpec, String> {
-    s.parse::<FixSpec>()
+impl Model {
+    fn both(&self) -> bool {
+        self.color_compatible
+    }
+
+    fn cgb(&self) -> bool {
+        self.color_only
+    }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FixState {
     Trash,
     Fix,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct FixSpec {
     logo: Option<FixState>,
     header: Option<FixState>,
     global: Option<FixState>,
 }
 
+impl FixSpec {
+    fn is_empty(&self) -> bool {
+        self.logo.is_some() & self.header.is_some() & self.global.is_some()
+    }
+}
+
+#[derive(Debug, Clone, Copy, thiserror::Error)]
+enum FixSpecError {
+    #[error("invalid character: {0}")]
+    InvalidCharacter(char),
+    #[error("more than one logo value ('l' or 'L') specified")]
+    DuplicateLogo,
+    #[error("more than one logo value ('h' or 'H') specified")]
+    DuplicateHeader,
+    #[error("more than one logo value ('g' or 'G') specified")]
+    DuplicateGlobal,
+}
+
 impl FromStr for FixSpec {
-    type Err = String;
+    type Err = FixSpecError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let mut fix_spec = FixSpec {
@@ -127,235 +145,101 @@ impl FromStr for FixSpec {
             global: None,
         };
 
-        for c in s.chars() {
-            // TOCHECK if something weird like "lL" is provided, this could do unexpected default behaviour
-            match c {
-                'l' => fix_spec.logo = Some(FixState::Fix),
-                'L' => fix_spec.logo = Some(FixState::Trash),
-                'h' => fix_spec.header = Some(FixState::Fix),
-                'H' => fix_spec.header = Some(FixState::Trash),
-                'g' => fix_spec.global = Some(FixState::Fix),
-                'G' => fix_spec.global = Some(FixState::Trash),
-                _ => return Err(format!("Invalid character: {}", c)),
+        type Fs = FixState;
+        type E = FixSpecError;
+
+        // Check for duplicate values.
+        let update = |field: &mut Option<Fs>, value, err| -> Result<(), E> {
+            if field.is_none() {
+                *field = Some(value);
+                Ok(())
+            } else {
+                Err(err)
             }
+        };
+
+        for c in s.chars() {
+            match c {
+                'l' => update(&mut fix_spec.logo, Fs::Fix, E::DuplicateLogo),
+                'L' => update(&mut fix_spec.logo, Fs::Trash, E::DuplicateLogo),
+                'h' => update(&mut fix_spec.header, Fs::Fix, E::DuplicateHeader),
+                'H' => update(&mut fix_spec.header, Fs::Trash, E::DuplicateHeader),
+                'g' => update(&mut fix_spec.global, Fs::Fix, E::DuplicateGlobal),
+                'G' => update(&mut fix_spec.global, Fs::Trash, E::DuplicateGlobal),
+                _ => Err(E::InvalidCharacter(c)),
+            }?
         }
 
         Ok(fix_spec)
     }
 }
 
-macro_rules! logo {
-    (
-		$i01:expr, $i02:expr, $i03:expr, $i04:expr, $i05:expr, $i06:expr, $i07:expr, $i08:expr,
-		$i11:expr, $i12:expr, $i13:expr, $i14:expr, $i15:expr, $i16:expr, $i17:expr, $i18:expr,
-		$i21:expr, $i22:expr, $i23:expr, $i24:expr, $i25:expr, $i26:expr, $i27:expr, $i28:expr,
-		$i31:expr, $i32:expr, $i33:expr, $i34:expr, $i35:expr, $i36:expr, $i37:expr, $i38:expr,
-		$i41:expr, $i42:expr, $i43:expr, $i44:expr, $i45:expr, $i46:expr, $i47:expr, $i48:expr,
-		$i51:expr, $i52:expr, $i53:expr, $i54:expr, $i55:expr, $i56:expr, $i57:expr, $i58:expr,
-	) => {
-        static NINTENDO_LOGO: [u8; 48] = [
-            $i01, $i02, $i03, $i04, $i05, $i06, $i07, $i08, $i11, $i12, $i13, $i14, $i15, $i16,
-            $i17, $i18, $i21, $i22, $i23, $i24, $i25, $i26, $i27, $i28, $i31, $i32, $i33, $i34,
-            $i35, $i36, $i37, $i38, $i41, $i42, $i43, $i54, $i45, $i46, $i47, $i48, $i51, $i52,
-            $i53, $i54, $i55, $i56, $i57, $i58,
-        ];
-
-        static TRASH_LOGO: [u8; 48] = [
-            0xFF ^ $i01,
-            0xFF ^ $i02,
-            0xFF ^ $i03,
-            0xFF ^ $i04,
-            0xFF ^ $i05,
-            0xFF ^ $i06,
-            0xFF ^ $i07,
-            0xFF ^ $i08,
-            0xFF ^ $i11,
-            0xFF ^ $i12,
-            0xFF ^ $i13,
-            0xFF ^ $i14,
-            0xFF ^ $i15,
-            0xFF ^ $i16,
-            0xFF ^ $i17,
-            0xFF ^ $i18,
-            0xFF ^ $i21,
-            0xFF ^ $i22,
-            0xFF ^ $i23,
-            0xFF ^ $i24,
-            0xFF ^ $i25,
-            0xFF ^ $i26,
-            0xFF ^ $i27,
-            0xFF ^ $i28,
-            0xFF ^ $i31,
-            0xFF ^ $i32,
-            0xFF ^ $i33,
-            0xFF ^ $i34,
-            0xFF ^ $i35,
-            0xFF ^ $i36,
-            0xFF ^ $i37,
-            0xFF ^ $i38,
-            0xFF ^ $i41,
-            0xFF ^ $i42,
-            0xFF ^ $i43,
-            0xFF ^ $i54,
-            0xFF ^ $i45,
-            0xFF ^ $i46,
-            0xFF ^ $i47,
-            0xFF ^ $i48,
-            0xFF ^ $i51,
-            0xFF ^ $i52,
-            0xFF ^ $i53,
-            0xFF ^ $i54,
-            0xFF ^ $i55,
-            0xFF ^ $i56,
-            0xFF ^ $i57,
-            0xFF ^ $i58,
-        ];
-    };
-}
-
-logo![
+static NINTENDO_LOGO: [u8; 48] = [
     0xCE, 0xED, 0x66, 0x66, 0xCC, 0x0D, 0x00, 0x0B, 0x03, 0x73, 0x00, 0x83, 0x00, 0x0C, 0x00, 0x0D,
     0x00, 0x08, 0x11, 0x1F, 0x88, 0x89, 0x00, 0x0E, 0xDC, 0xCC, 0x6E, 0xE6, 0xDD, 0xDD, 0xD9, 0x99,
-    0xBB, 0xBB, 0x67, 0x63, 0x6E, 0x0E, 0xEC, 0xCC, 0xDD, 0xDC, 0x99, 0x9F, 0xBB, 0xB9, 0x33, 0x3E,
+    0xBB, 0xBB, 0x67, 0x9F, 0x6E, 0x0E, 0xEC, 0xCC, 0xDD, 0xDC, 0x99, 0x9F, 0xBB, 0xB9, 0x33, 0x3E,
 ];
 
 fn main() {
-    let mut cli_options = CliOptions {
-        game_id: None,
-        japanese: true,
-        new_licensee: None,
-        old_licensee: None,
-        cartridge_type: None,
-        rom_version: None,
-        overwrite_rom: false,
-        pad_value: None,
-        ram_size: None,
-        sgb: false,
-        model: Model::Dmg,
-        fix_spec: FixSpec {
-            logo: None,
-            header: None,
-            global: None,
-        },
-        title: None,
-        title_len: 0,
-    };
+    tracing_subscriber::fmt()
+        .event_format(tracing_subscriber::fmt::format().without_time().compact())
+        .init();
+    let mut cli = Cli::parse();
 
-    let cli = Cli::parse();
-
-    if let Some(mut game_id) = cli.game_id {
+    // TODO: move this to clap.
+    if let Some(game_id) = &mut cli.game_id {
         if game_id.len() > 4 {
-            println!("warning: Truncating game ID \"{}\" to 4 chars", &game_id);
-            // Truncate game_id to 4 characters if it's longer
+            // Use the debug display here to add quotes and escaping.
+            warn!("truncating game ID {game_id:?} to 4 chars");
             game_id.truncate(4);
-            println!("Truncated game ID: {}", &game_id);
         } else {
-            println!("Game ID: {}", &game_id);
+            info!("game ID: {game_id}");
         }
-        cli_options.game_id = Some(game_id);
     }
 
-    if cli.non_japanese {
-        cli_options.japanese = false;
-    }
-
-    if let Some(mut new_licensee) = cli.new_licensee {
+    // TODO: move this to clap.
+    if let Some(new_licensee) = &mut cli.new_licensee {
         let len = new_licensee.len() as u8;
         if len > 2 {
-            println!(
-                "warning: Truncating new licensee \"{}\" to 2 chars",
-                &new_licensee
-            );
-            new_licensee = new_licensee[0..2].to_string();
-            println!("Truncated new licencee: {}", &new_licensee[0..2]);
+            warn!("truncating new licensee {new_licensee:?} to 2 chars",);
+            new_licensee.truncate(2);
         } else {
-            println!("New licensee: {}", &new_licensee);
-        }
-        cli_options.new_licensee = Some(new_licensee);
-    }
-
-    if let Some(old_licensee) = cli.old_licensee {
-        cli_options.old_licensee = Some(old_licensee)
-    }
-
-    if let Some(mbc_type) = cli.mbc_type {
-        let mbc_type = mbc_type.parse::<MbcType>().unwrap_or_else(|msg| {
-            eprintln!("failed to parse mbc type: {msg}");
-            process::exit(1);
-        });
-        cli_options.cartridge_type = Some(mbc_type);
-        if matches!(mbc_type, MbcType::Rom(Some(_))) {
-            eprintln!(
-                "warning: ROM+RAM / ROM+RAM+BATTERY are under-specified and poorly supported"
-            );
+            info!("new licensee: {new_licensee}");
         }
     }
 
-    if let Some(rom_version) = cli.rom_version {
-        cli_options.rom_version = Some(rom_version)
+    // TODO: move this to clap (validator).
+    if matches!(cli.mbc_type, Some(MbcType::Rom(Some(_)))) {
+        warn!("ROM+RAM / ROM+RAM+BATTERY are under-specified and poorly supported");
     }
 
-    if cli.overwrite {
-        cli_options.overwrite_rom = true;
-    }
-
-    if let Some(pad_value) = cli.pad_value {
-        cli_options.pad_value = Some(pad_value)
-    }
-
-    if let Some(ram_size) = cli.ram_size {
-        cli_options.ram_size = Some(ram_size)
-    }
-
-    if cli.sgb_compatible {
-        cli_options.sgb = true;
-    }
-
-    if let Some(title) = cli.title {
-        cli_options.title = Some(title.clone());
-        let mut len = title.len();
-        let max_len = max_title_len(&cli_options.game_id, &cli_options.model);
-        if len > max_len {
-            len = max_len;
-            println!(
-                "warning: Truncating title \"{}\" to {} chars",
-                title, max_len
-            );
-            cli_options.title_len = len;
-        }
-    }
-
-    if cli.color_only || cli.color_compatible {
-        cli_options.model = if cli.color_compatible {
-            Model::Both
-        } else {
-            Model::Cgb
+    // TODO: move this to clap.
+    if let Some(title) = &mut cli.title {
+        let max_len = match (cli.game_id.is_some(), cli.model.both() | cli.model.cgb()) {
+            (true, _) => 11,
+            (false, true) => 15,
+            _ => 16,
         };
-        if cli_options.title_len > 15 {
-            if let Some(mut title) = cli_options.title {
-                title = title[0..15].to_string();
-                eprintln!("warning: Truncating title \"{}\" to 15 chars", title);
-                cli_options.title = Some(title);
-            }
+        if title.len() > max_len {
+            warn!("truncating title {title:?} to {max_len} chars",);
+            title.truncate(max_len);
         }
-    }
-
-    if cli.version {
-        println!("rgbfix version {}", cli.version);
-        process::exit(0);
     }
 
     if cli.validate {
-        cli_options.fix_spec = FixSpec {
+        if cli.fix_spec.is_empty() {
+            warn!("-v overwrites -f");
+        }
+        cli.fix_spec = FixSpec {
             logo: Some(FixState::Fix),
             header: Some(FixState::Fix),
             global: Some(FixState::Fix),
         };
     }
-    if !cli.files.is_empty() {
-        // TODO: [0] is dubious, are multiple files getting fixed in one CLI call possible?
-        if let Err(msg) = process_filename(&cli.files[0], cli_options) {
-            eprintln!("{msg}");
+
+    for i in &cli.files {
+        if let Err(msg) = process_filename(i, &cli) {
+            error!("{}: {msg}", i.display());
         }
     }
 }
@@ -630,21 +514,6 @@ impl FromStr for MbcType {
     }
 }
 
-#[derive(Debug, Clone)]
-enum Model {
-    Dmg,
-    Both,
-    Cgb,
-}
-
-fn max_title_len(game_id: &Option<String>, model: &Model) -> usize {
-    match (game_id.is_some(), !matches!(model, Model::Dmg)) {
-        (true, _) => 11,
-        (false, true) => 15,
-        _ => 16,
-    }
-}
-
 fn read_bytes<R: Read>(fd: &mut R, mut buf: &mut [u8]) -> io::Result<usize> {
     let mut total = 0;
     while !buf.is_empty() {
@@ -662,83 +531,67 @@ fn read_bytes<R: Read>(fd: &mut R, mut buf: &mut [u8]) -> io::Result<usize> {
     Ok(total)
 }
 
-fn write_bytes(file: &mut File, buf: &[u8]) -> io::Result<usize> {
-    let mut total = 0;
-    let mut len = buf.len();
-
-    while len > 0 {
-        match file.write(&buf[total..]) {
-            Ok(0) => {
-                // EOF reached
-                break;
-            }
-            Ok(n) => {
-                // If anything was written, accumulate it, and continue
-                total += n;
-                len -= n;
-            }
-            Err(ref e) if e.kind() == io::ErrorKind::Interrupted => {
-                // Interrupted, continue
-                continue;
-            }
-            Err(e) => {
-                // Return errors, unless we only were interrupted
-                return Err(e);
-            }
-        }
-    }
-
-    Ok(total)
-}
-
-fn overwrite_byte(
-    rom0: &mut [u8],
-    addr: u16,
-    fixed_byte: u8,
-    area_name: &str,
-    overwrite_rom: bool,
-) {
+fn overwrite_byte(rom0: &mut [u8], addr: u16, fixed_byte: u8, area: &str, overwrite: bool) {
     let orig_byte = rom0[addr as usize];
 
-    if !overwrite_rom && orig_byte != 0 && orig_byte != fixed_byte {
-        eprintln!("warning: Overwrote a non-zero byte in the {}", area_name);
+    if !overwrite && orig_byte != 0 && orig_byte != fixed_byte {
+        warn!("overwrote a non-zero byte in the {area}");
     }
 
     rom0[addr as usize] = fixed_byte;
 }
 
-fn overwrite_bytes(
+fn overwrite_prelude(
     rom0: &mut [u8],
-    start_addr: u16,
+    start_addr: usize,
     fixed: &[u8],
-    area_name: &str,
-    overwrite_rom: bool,
-) -> io::Result<()> {
-    if start_addr as usize + fixed.len() > rom0.len() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "Address or size out of bounds",
-        ));
+    area: &str,
+    overwrite: bool,
+) {
+    if start_addr + fixed.len() >= rom0.len() {
+        panic!("attempted to overwrite a byte outside of ROM0");
     }
-    if !overwrite_rom {
+
+    if !overwrite {
         for (i, &byte) in fixed.iter().enumerate() {
-            if rom0[i + start_addr as usize] != 0 && rom0[i + start_addr as usize] != byte {
-                println!("warning: Overwrote a non-zero byte in the {}", area_name);
+            if rom0[i + start_addr] != 0 && rom0[i + start_addr] != byte {
+                warn!("overwrote a non-zero byte in the {area}");
                 break;
             }
         }
     }
-    rom0[start_addr as usize..start_addr as usize + fixed.len()].copy_from_slice(fixed);
-    Ok(())
+}
+
+fn overwrite_bytes(rom0: &mut [u8], start_addr: u16, fixed: &[u8], area: &str, overwrite: bool) {
+    let start_addr = start_addr as usize;
+    overwrite_prelude(rom0, start_addr, fixed, area, overwrite);
+    rom0[start_addr..start_addr + fixed.len()].copy_from_slice(fixed);
+}
+
+fn overwrite_inverted_bytes(
+    rom0: &mut [u8],
+    start_addr: u16,
+    fixed: &[u8],
+    area: &str,
+    overwrite: bool,
+) {
+    let start_addr = start_addr as usize;
+    overwrite_prelude(rom0, start_addr, fixed, area, overwrite);
+
+    for (dest, source) in rom0[start_addr..start_addr + fixed.len()]
+        .iter_mut()
+        .zip(fixed)
+    {
+        *dest = *source ^ 0xFF
+    }
 }
 
 fn process_file(
     input: &mut File,
     output: &mut File,
-    name: &str,
     file_size: u64,
-    options: CliOptions,
-) -> io::Result<()> {
+    options: &Cli,
+) -> Result<(), Error> {
     // Check if the file is seekable
     /* TODO: I have no idea what these checks are doing, so I disabled them. Check this.
     if true || input.as_raw_fd() == output.as_raw_fd() {
@@ -748,30 +601,20 @@ fn process_file(
     }
     */
 
-    let mut rom0 = [0u8; BANK_SIZE];
-    let mut rom0_len = match read_bytes(input, &mut rom0) {
-        Ok(corr_len) => corr_len,
-        Err(e) => {
-            eprintln!("Invalid file input: {e}");
-            process::exit(1);
-        }
-    };
+    let mut rom0 = [0; BANK_SIZE];
+    let mut rom0_len = read_bytes(input, &mut rom0)?;
 
-    let header_size = if matches!(&options.cartridge_type, Some(MbcType::Tpp1 { .. })) {
+    let header_size = if matches!(&options.mbc_type, Some(MbcType::Tpp1 { .. })) {
         0x154
     } else {
         0x150
     };
 
     if rom0_len < header_size {
-        eprintln!(
-            "FATAL: \"{}\" too short, expected at least {} bytes, got only {}",
-            name, header_size, rom0_len
-        );
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "File too short",
-        ));
+        return Err(Error::TooShort {
+            expected: header_size,
+            got: rom0_len,
+        });
     }
 
     match options.fix_spec.logo {
@@ -780,71 +623,61 @@ fn process_file(
             0x0104,
             &NINTENDO_LOGO,
             "Nintendo logo",
-            options.overwrite_rom,
-        )?,
-        Some(FixState::Trash) => overwrite_bytes(
+            options.overwrite,
+        ),
+        Some(FixState::Trash) => overwrite_inverted_bytes(
             &mut rom0,
             0x0104,
-            &TRASH_LOGO,
+            &NINTENDO_LOGO,
             "Nintendo logo",
-            options.overwrite_rom,
-        )?,
+            options.overwrite,
+        ),
         None => (),
     }
 
-    if let Some(title) = options.title {
+    if let Some(title) = &options.title {
         overwrite_bytes(
             &mut rom0[..],
             0x134,
             title.as_bytes(),
             "title",
-            options.overwrite_rom,
-        )?;
+            options.overwrite,
+        );
     }
 
-    if let Some(game_id) = options.game_id {
+    if let Some(game_id) = &options.game_id {
         overwrite_bytes(
             &mut rom0[..],
             0x13F,
             game_id.as_bytes(),
             "manufacturer code",
-            options.overwrite_rom,
-        )?;
+            options.overwrite,
+        );
     }
 
-    if !matches!(options.model, Model::Dmg) {
-        match options.model {
-            Model::Both => {
-                overwrite_byte(&mut rom0, 0x143, 0x80, "Cgb flag", options.overwrite_rom)
-            }
-            Model::Cgb => overwrite_byte(&mut rom0, 0x143, 0xC0, "Cgb flag", options.overwrite_rom),
-            Model::Dmg => (),
-        };
-    };
+    if options.model.both() {
+        overwrite_byte(&mut rom0, 0x143, 0x80, "Cgb flag", options.overwrite);
+    } else if options.model.cgb() {
+        overwrite_byte(&mut rom0, 0x143, 0xC0, "Cgb flag", options.overwrite);
+    }
 
-    if let Some(new_licensee) = options.new_licensee {
+    if let Some(new_licensee) = &options.new_licensee {
         overwrite_bytes(
             &mut rom0[..],
             0x144,
             new_licensee.as_bytes(),
             "new licensee code",
-            options.overwrite_rom,
-        )?;
+            options.overwrite,
+        );
     }
 
-    if options.sgb {
-        overwrite_byte(
-            &mut rom0[..],
-            0x146,
-            0x03,
-            "SGB flag",
-            options.overwrite_rom,
-        );
+    if options.sgb_compatible {
+        overwrite_byte(&mut rom0[..], 0x146, 0x03, "SGB flag", options.overwrite);
     }
 
     let ram_size = options.ram_size;
 
-    if let Some(ref cartridge_type) = options.cartridge_type {
+    if let Some(cartridge_type) = options.mbc_type {
         let byte = cartridge_type.to_code().try_into().unwrap_or(
             // Out-of-range cartridge bytes aren't directly actionable, translate them.
             // The other TPP1 identification bytes will be written below
@@ -856,13 +689,13 @@ fn process_file(
             0x147,
             byte,
             "cartridge type",
-            options.overwrite_rom,
+            options.overwrite,
         );
     }
 
     // ROM size will be written last, after evaluating the file's size
 
-    if let Some(cartridge_type @ MbcType::Tpp1 { .. }) = options.cartridge_type {
+    if let Some(cartridge_type @ MbcType::Tpp1 { .. }) = options.mbc_type {
         let tpp1_code = vec![0xC1, 0x65];
         let tpp1_rev = vec![0xC1, 0x65]; // TODO WARNING PLACEHOLDER NOT ACTUAL VALUES, PICK UP FROM OPTIONS INSTEAD?
 
@@ -872,16 +705,16 @@ fn process_file(
             0x149,
             &tpp1_code,
             "TPP1 identification code",
-            options.overwrite_rom,
-        )?;
+            options.overwrite,
+        );
 
         overwrite_bytes(
             &mut rom0[..],
             0x150,
             &tpp1_rev,
             "TPP1 revision number",
-            options.overwrite_rom,
-        )?;
+            options.overwrite,
+        );
 
         if let Some(ram_size) = ram_size {
             overwrite_byte(
@@ -889,7 +722,7 @@ fn process_file(
                 0x152,
                 ram_size,
                 "RAM size",
-                options.overwrite_rom,
+                options.overwrite,
             );
         }
 
@@ -899,7 +732,7 @@ fn process_file(
             // This truncates and that's fine.
             cartridge_type.to_code() as u8,
             "TPP1 feature flags",
-            options.overwrite_rom,
+            options.overwrite,
         );
     } else {
         // Regular mappers
@@ -910,17 +743,17 @@ fn process_file(
                 0x149,
                 ram_size,
                 "RAM size",
-                options.overwrite_rom,
+                options.overwrite,
             );
         }
 
-        if !options.japanese {
+        if options.non_japanese {
             overwrite_byte(
                 &mut rom0[..],
                 0x14A,
                 0x01,
                 "destination code",
-                options.overwrite_rom,
+                options.overwrite,
             );
         }
     }
@@ -931,11 +764,11 @@ fn process_file(
             0x14B,
             old_licensee,
             "old licensee code",
-            options.overwrite_rom,
+            options.overwrite,
         );
-    } else if options.sgb && rom0[0x14B] != 0x33 {
-        eprintln!(
-            "warning: SGB compatibility enabled, but old licensee was 0x{:02x}, not 0x33",
+    } else if options.sgb_compatible && rom0[0x14B] != 0x33 {
+        warn!(
+            "SGB compatibility enabled, but old licensee was 0x{:02x}, not 0x33",
             rom0[0x14B]
         );
     }
@@ -946,21 +779,21 @@ fn process_file(
             0x14C,
             rom_version,
             "mask ROM version number",
-            options.overwrite_rom,
+            options.overwrite,
         );
     }
 
-    let mut romx: Vec<u8> = Vec::new(); // Buffer of ROMX bank data
-    let mut nb_banks: u32 = 1; // Number of banks *targeted*, including ROM0
-    let mut total_romx_len: usize = 0; // *Actual* size of ROMX data
-    let mut bank: [u8; BANK_SIZE] = [0; BANK_SIZE]; // Temp buffer used to store a whole bank's worth of data
-    let mut global_sum: u16 = 0; // Global checksum variable
+    let romx = Vec::new(); // Buffer of ROMX bank data
+    let mut nb_banks; // Number of banks *targeted*, including ROM0
+    let total_romx_len; // *Actual* size of ROMX data
+    let mut bank = [0; BANK_SIZE]; // Temp buffer used to store a whole bank's worth of data
+    let mut global_sum = 0; // Global checksum variable
 
     // Handle ROMX
-    if true || input.as_raw_fd() == output.as_raw_fd() {
+    /* input.as_raw_fd() == output.as_raw_fd() */
+    {
         if file_size >= (0x10000 * BANK_SIZE) as u64 {
-            eprintln!("FATAL: \"{}\" has more than 65536 banks", name);
-            return Ok(());
+            return Err(Error::TooManyBanks(file_size / BANK_SIZE as u64));
         }
         // This should be guaranteed from the size cap...
         // Rust doesn't have static_assert in the same way C++ does, but we can use compile-time checks with const assertions
@@ -973,38 +806,38 @@ fn process_file(
         } else {
             0
         };
-    } else if rom0_len == BANK_SIZE {
-        // Copy ROMX when reading a pipe, and we're not at EOF yet
-        loop {
-            romx.resize((nb_banks * BANK_SIZE as u32) as usize, 0); // Initialize new elements to 0
-            let bank_len = read_bytes(
-                input,
-                &mut romx[((nb_banks - 1) * BANK_SIZE as u32) as usize..],
-            )?;
+    } /* else if rom0_len == BANK_SIZE {
+          // Copy ROMX when reading a pipe, and we're not at EOF yet
+          loop {
+              romx.resize((nb_banks * BANK_SIZE as u32) as usize, 0); // Initialize new elements to 0
+              let bank_len = read_bytes(
+                  input,
+                  &mut romx[((nb_banks - 1) * BANK_SIZE as u32) as usize..],
+              )?;
 
-            // Update bank count, ONLY IF at least one byte was read
-            if bank_len > 0 {
-                // We're gonna read another bank, check that it won't be too much
-                // TOCHECK: same thing as the previous one
-                // const _: () = assert!(0x10000 * BANK_SIZE <= std::mem::size_of::<usize>());
-                if nb_banks == 0x10000 {
-                    eprintln!("FATAL: \"{}\" has more than 65536 banks", name);
-                    return Ok(());
-                }
-                nb_banks += 1;
+              // Update bank count, ONLY IF at least one byte was read
+              if bank_len > 0 {
+                  // We're gonna read another bank, check that it won't be too much
+                  // TOCHECK: same thing as the previous one
+                  // const _: () = assert!(0x10000 * BANK_SIZE <= std::mem::size_of::<usize>());
+                  if nb_banks == 0x10000 {
+                      eprintln!("FATAL: \"{}\" has more than 65536 banks", name);
+                      return Ok(());
+                  }
+                  nb_banks += 1;
 
-                // Update global checksum, too
-                for i in 0..bank_len {
-                    global_sum += romx[total_romx_len + i] as u16;
-                }
-                total_romx_len += bank_len;
-            }
-            // Stop when an incomplete bank has been read
-            if bank_len != BANK_SIZE {
-                break;
-            }
-        }
-    }
+                  // Update global checksum, too
+                  for i in 0..bank_len {
+                      global_sum += romx[total_romx_len + i] as u16;
+                  }
+                  total_romx_len += bank_len;
+              }
+              // Stop when an incomplete bank has been read
+              if bank_len != BANK_SIZE {
+                  break;
+              }
+          }
+      } */
 
     if let Some(pad_value) = options.pad_value {
         // We want at least 2 banks
@@ -1051,7 +884,7 @@ fn process_file(
                 sum
             },
             "header checksum",
-            options.overwrite_rom,
+            options.overwrite,
         );
     }
 
@@ -1062,7 +895,8 @@ fn process_file(
             global_sum = global_sum.wrapping_add(*i as u16);
         }
         // Pipes have already read ROMX and updated global_sum, but not regular files
-        if true || input.as_raw_fd() == output.as_raw_fd() {
+        /* if true || input.as_raw_fd() == output.as_raw_fd() */
+        {
             loop {
                 let bank_len = read_bytes(input, &mut bank)?;
 
@@ -1086,19 +920,15 @@ fn process_file(
             0x14E,
             &bytes,
             "global checksum",
-            options.overwrite_rom,
-        )?;
+            options.overwrite,
+        );
     }
-
-    let mut write_len: usize;
 
     // In case the output depends on the input, reset to the beginning of the file, and only
     // write the header
-    if true || input.as_raw_fd() == output.as_raw_fd() {
-        if let Err(e) = output.seek(io::SeekFrom::Start(0)) {
-            eprintln!("FATAL: Failed to rewind \"{}\": {}", name, e);
-            return Ok(());
-        }
+    /* if true || input.as_raw_fd() == output.as_raw_fd() */
+    {
+        output.seek(io::SeekFrom::Start(0))?;
         // If modifying the file in-place, we only need to edit the header
         // However, padding may have modified ROM0 (added padding), so don't in that case
         if options.pad_value.is_some() {
@@ -1106,35 +936,18 @@ fn process_file(
         }
     }
 
-    write_len = write_bytes(output, &rom0[..rom0_len])?;
-
-    if (write_len) < rom0_len {
-        eprintln!(
-            "FATAL: Could only write {} of \"{}\"'s {} ROM0 bytes",
-            write_len, name, rom0_len
-        );
-        return Err(io::Error::new(io::ErrorKind::UnexpectedEof, ""));
-    }
+    output.write_all(&rom0[..rom0_len])?;
 
     // Output ROMX if it was buffered
     if !romx.is_empty() {
-        write_len = write_bytes(output, &romx[..total_romx_len])?;
-        if (write_len) < total_romx_len {
-            eprintln!(
-                "FATAL: Could only write {} of \"{}\"'s {} ROMX bytes",
-                write_len, name, total_romx_len
-            );
-            return Err(io::Error::new(io::ErrorKind::UnexpectedEof, ""));
-        }
+        output.write_all(&romx[..total_romx_len])?;
     }
 
     // Output padding
     if options.pad_value.is_some() {
-        if true || input.as_raw_fd() == output.as_raw_fd() {
-            if let Err(e) = output.seek(io::SeekFrom::End(0)) {
-                eprintln!("FATAL: Failed to seek to end of \"{}\": {}", name, e);
-                return Err(io::Error::new(io::ErrorKind::InvalidInput, ""));
-            }
+        /* if true || input.as_raw_fd() == output.as_raw_fd() */
+        {
+            output.seek(io::SeekFrom::End(0))?;
         }
         bank.fill(options.pad_value.unwrap());
         let mut len = (nb_banks - 1) * BANK_SIZE as u32 - total_romx_len as u32; // Don't count ROM0!
@@ -1145,16 +958,7 @@ fn process_file(
             } else {
                 len as usize
             };
-            write_len = write_bytes(output, &bank[..this_len])?;
-
-            if write_len != this_len {
-                eprintln!(
-                    "FATAL: Failed to write \"{}\"'s padding: {}",
-                    name,
-                    io::Error::last_os_error()
-                );
-                break;
-            }
+            output.write_all(&bank[..this_len])?;
             len -= this_len as u32;
         }
     }
@@ -1162,41 +966,28 @@ fn process_file(
     Ok(())
 }
 
-fn process_filename(name: &str, options: CliOptions) -> io::Result<bool> {
-    let mut nb_errors = 0;
-    let mut file = OpenOptions::new().read(true).write(true).open(name)?;
+fn process_filename(path: impl AsRef<Path>, options: &Cli) -> Result<(), Error> {
+    let path = path.as_ref();
+
+    let mut file = OpenOptions::new().read(true).write(true).open(path)?;
     let mut temp_file = file.try_clone()?; //TOCHECK: This could be plain wrong, check what output file actually does in process_File
-    if name == "-" {
+    if path == Path::new("-") {
         //TOCHECK: Make SURE only [u8] are used in processing to avoid Windows OS translating newline characters.
-        process_file(&mut file, &mut temp_file, name, 0, options)?;
+        process_file(&mut file, &mut temp_file, 0, options)?;
     } else {
         let metadata = file.metadata()?;
         if !metadata.is_file() {
-            eprintln!(
-                "FATAL: \"{}\" is not a regular file, and thus cannot be modified in-place",
-                name
-            );
-            nb_errors += 1;
-        } else if metadata.len() < 0x150 {
-            eprintln!(
-                "FATAL: \"{}\" too short, expected at least 336 ($150) bytes, got only {}",
-                name,
-                metadata.len()
-            );
-            nb_errors += 1;
-        } else {
-            process_file(&mut file, &mut temp_file, name, metadata.len(), options)?;
+            return Err(Error::IrregularFile);
         }
+        if metadata.len() < 0x150 {
+            return Err(Error::TooShort {
+                expected: 336,
+                // This cast is safe because anything under 336 will always fit in `usize`.
+                got: metadata.len() as usize,
+            });
+        }
+        process_file(&mut file, &mut temp_file, metadata.len(), options)?;
     }
 
-    if nb_errors > 0 {
-        eprintln!(
-            "Fixing \"{}\" failed with {} error{}",
-            name,
-            nb_errors,
-            if nb_errors == 1 { "" } else { "s" }
-        );
-    }
-
-    Ok(nb_errors == 0)
+    Ok(())
 }
