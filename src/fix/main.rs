@@ -3,9 +3,22 @@ use clap_num::maybe_hex;
 use std::fs::{File, OpenOptions};
 use std::io::{self, Read, Seek, Write};
 use std::path::{Path, PathBuf};
-use std::{process, str::FromStr};
+use std::str::FromStr;
+use tracing::*;
 
 const BANK_SIZE: usize = 0x4000;
+
+#[derive(Debug, thiserror::Error)]
+enum Error {
+    #[error("failed to read file: {0}")]
+    Io(#[from] io::Error),
+    #[error("file too short: expected at least {expected} bytes, got only {got}")]
+    TooShort { expected: usize, got: usize },
+    #[error("not a regular file; cannot be modified in-place")]
+    IrregularFile,
+    #[error("cannot have over 65535 banks ({0})")]
+    TooManyBanks(u64),
+}
 
 #[derive(Parser, Debug)]
 #[clap(version, about = "A tool to fix ROM files for Game Boy.")]
@@ -13,55 +26,55 @@ struct Cli {
     #[clap(flatten)]
     model: Model,
 
-    #[clap(short = 'f', long = "fix-spec", value_name = "FIX_SPEC")]
+    #[clap(short = 'f', long, value_name = "FIX_SPEC", default_value = "")]
     /// Specify a fix specification
     fix_spec: FixSpec,
 
-    #[clap(short = 'i', long = "game-id", value_name = "GAME_ID")]
+    #[clap(short = 'i', long, value_name = "GAME_ID")]
     /// Specify a game ID
     game_id: Option<String>,
 
-    #[clap(short = 'j', long = "non-japanese")]
+    #[clap(short = 'j', long)]
     /// Non-Japanese mode
     non_japanese: bool,
 
-    #[clap(short = 'k', long = "new-licensee", value_name = "NEW_LICENSEE")]
+    #[clap(short = 'k', long, value_name = "NEW_LICENSEE")]
     /// Specify a new licensee
     new_licensee: Option<String>,
 
-    #[clap(short = 'l', long = "old-licensee", value_name = "OLD_LICENSEE", value_parser=maybe_hex::<u8>)]
+    #[clap(short = 'l', long, value_name = "OLD_LICENSEE", value_parser=maybe_hex::<u8>)]
     /// Specify an old licensee
     old_licensee: Option<u8>,
 
-    #[clap(short = 'm', long = "mbc-type", value_name = "MBC_TYPE")]
+    #[clap(short = 'm', long, value_name = "MBC_TYPE")]
     /// Specify the MBC type
     mbc_type: Option<MbcType>,
 
-    #[clap(short = 'n', long = "rom-version", value_name = "ROM_VERSION", value_parser=maybe_hex::<u8>)]
+    #[clap(short = 'n', long, value_name = "ROM_VERSION", value_parser=maybe_hex::<u8>)]
     /// Specify the ROM version
     rom_version: Option<u8>,
 
-    #[clap(short = 'O', long = "overwrite")]
+    #[clap(short = 'O', long)]
     /// Overwrite the file
     overwrite: bool,
 
-    #[clap(short = 'p', long = "pad-value", value_name = "PAD_VALUE", value_parser=maybe_hex::<u8>)]
+    #[clap(short = 'p', long, value_name = "PAD_VALUE", value_parser=maybe_hex::<u8>)]
     /// Specify the padding value
     pad_value: Option<u8>,
 
-    #[clap(short = 'r', long = "ram-size", value_name = "RAM_SIZE", value_parser=maybe_hex::<u8>)]
+    #[clap(short = 'r', long, value_name = "RAM_SIZE", value_parser=maybe_hex::<u8>)]
     /// Specify the RAM size
     ram_size: Option<u8>,
 
-    #[clap(short = 's', long = "sgb-compatible")]
+    #[clap(short = 's', long)]
     /// SGB-compatible mode
     sgb_compatible: bool,
 
-    #[clap(short = 't', long = "title", value_name = "TITLE")]
+    #[clap(short = 't', long, value_name = "TITLE")]
     /// Specify the title
     title: Option<String>,
 
-    #[clap(short = 'v', long = "validate")]
+    #[clap(short = 'v', long)]
     /// Fix the header logo and both checksums (-f lhg)
     validate: bool,
 
@@ -161,93 +174,24 @@ impl FromStr for FixSpec {
     }
 }
 
-macro_rules! logo {
-    (
-		$i01:expr, $i02:expr, $i03:expr, $i04:expr, $i05:expr, $i06:expr, $i07:expr, $i08:expr,
-		$i11:expr, $i12:expr, $i13:expr, $i14:expr, $i15:expr, $i16:expr, $i17:expr, $i18:expr,
-		$i21:expr, $i22:expr, $i23:expr, $i24:expr, $i25:expr, $i26:expr, $i27:expr, $i28:expr,
-		$i31:expr, $i32:expr, $i33:expr, $i34:expr, $i35:expr, $i36:expr, $i37:expr, $i38:expr,
-		$i41:expr, $i42:expr, $i43:expr, $i44:expr, $i45:expr, $i46:expr, $i47:expr, $i48:expr,
-		$i51:expr, $i52:expr, $i53:expr, $i54:expr, $i55:expr, $i56:expr, $i57:expr, $i58:expr,
-	) => {
-        static NINTENDO_LOGO: [u8; 48] = [
-            $i01, $i02, $i03, $i04, $i05, $i06, $i07, $i08, $i11, $i12, $i13, $i14, $i15, $i16,
-            $i17, $i18, $i21, $i22, $i23, $i24, $i25, $i26, $i27, $i28, $i31, $i32, $i33, $i34,
-            $i35, $i36, $i37, $i38, $i41, $i42, $i43, $i54, $i45, $i46, $i47, $i48, $i51, $i52,
-            $i53, $i54, $i55, $i56, $i57, $i58,
-        ];
-
-        static TRASH_LOGO: [u8; 48] = [
-            0xFF ^ $i01,
-            0xFF ^ $i02,
-            0xFF ^ $i03,
-            0xFF ^ $i04,
-            0xFF ^ $i05,
-            0xFF ^ $i06,
-            0xFF ^ $i07,
-            0xFF ^ $i08,
-            0xFF ^ $i11,
-            0xFF ^ $i12,
-            0xFF ^ $i13,
-            0xFF ^ $i14,
-            0xFF ^ $i15,
-            0xFF ^ $i16,
-            0xFF ^ $i17,
-            0xFF ^ $i18,
-            0xFF ^ $i21,
-            0xFF ^ $i22,
-            0xFF ^ $i23,
-            0xFF ^ $i24,
-            0xFF ^ $i25,
-            0xFF ^ $i26,
-            0xFF ^ $i27,
-            0xFF ^ $i28,
-            0xFF ^ $i31,
-            0xFF ^ $i32,
-            0xFF ^ $i33,
-            0xFF ^ $i34,
-            0xFF ^ $i35,
-            0xFF ^ $i36,
-            0xFF ^ $i37,
-            0xFF ^ $i38,
-            0xFF ^ $i41,
-            0xFF ^ $i42,
-            0xFF ^ $i43,
-            0xFF ^ $i54,
-            0xFF ^ $i45,
-            0xFF ^ $i46,
-            0xFF ^ $i47,
-            0xFF ^ $i48,
-            0xFF ^ $i51,
-            0xFF ^ $i52,
-            0xFF ^ $i53,
-            0xFF ^ $i54,
-            0xFF ^ $i55,
-            0xFF ^ $i56,
-            0xFF ^ $i57,
-            0xFF ^ $i58,
-        ];
-    };
-}
-
-logo![
+static NINTENDO_LOGO: [u8; 48] = [
     0xCE, 0xED, 0x66, 0x66, 0xCC, 0x0D, 0x00, 0x0B, 0x03, 0x73, 0x00, 0x83, 0x00, 0x0C, 0x00, 0x0D,
     0x00, 0x08, 0x11, 0x1F, 0x88, 0x89, 0x00, 0x0E, 0xDC, 0xCC, 0x6E, 0xE6, 0xDD, 0xDD, 0xD9, 0x99,
-    0xBB, 0xBB, 0x67, 0x63, 0x6E, 0x0E, 0xEC, 0xCC, 0xDD, 0xDC, 0x99, 0x9F, 0xBB, 0xB9, 0x33, 0x3E,
+    0xBB, 0xBB, 0x67, 0x9F, 0x6E, 0x0E, 0xEC, 0xCC, 0xDD, 0xDC, 0x99, 0x9F, 0xBB, 0xB9, 0x33, 0x3E,
 ];
 
 fn main() {
+    tracing_subscriber::fmt::init();
     let mut cli = Cli::parse();
 
     // TODO: move this to clap.
     if let Some(game_id) = &mut cli.game_id {
         if game_id.len() > 4 {
-            eprintln!("warning: Truncating game ID \"{}\" to 4 chars", &game_id);
-            // Truncate game_id to 4 characters if it's longer
+            // Use the debug display here to add quotes and escaping.
+            warn!("truncating game ID {game_id:?} to 4 chars");
             game_id.truncate(4);
-            eprintln!("Truncated game ID: {}", &game_id);
         } else {
-            eprintln!("Game ID: {}", &game_id);
+            info!("game ID: {game_id}");
         }
     }
 
@@ -255,20 +199,16 @@ fn main() {
     if let Some(new_licensee) = &mut cli.new_licensee {
         let len = new_licensee.len() as u8;
         if len > 2 {
-            eprintln!(
-                "warning: Truncating new licensee \"{}\" to 2 chars",
-                &new_licensee
-            );
+            warn!("truncating new licensee {new_licensee:?} to 2 chars",);
             new_licensee.truncate(2);
-            eprintln!("Truncated new licencee: {}", &new_licensee);
         } else {
-            eprintln!("New licensee: {}", &new_licensee);
+            info!("new licensee: {new_licensee}");
         }
     }
 
     // TODO: move this to clap (validator).
     if matches!(cli.mbc_type, Some(MbcType::Rom(Some(_)))) {
-        eprintln!("warning: ROM+RAM / ROM+RAM+BATTERY are under-specified and poorly supported");
+        warn!("ROM+RAM / ROM+RAM+BATTERY are under-specified and poorly supported");
     }
 
     // TODO: move this to clap.
@@ -279,17 +219,14 @@ fn main() {
             _ => 16,
         };
         if title.len() > max_len {
-            eprintln!(
-                "warning: Truncating title \"{}\" to {} chars",
-                title, max_len
-            );
+            warn!("truncating title {title:?} to {max_len} chars",);
             title.truncate(max_len);
         }
     }
 
     if cli.validate {
         if cli.fix_spec.is_empty() {
-            eprintln!("warning: -v overwriting -f");
+            warn!("-v overwrites -f");
         }
         cli.fix_spec = FixSpec {
             logo: Some(FixState::Fix),
@@ -300,7 +237,7 @@ fn main() {
 
     for i in &cli.files {
         if let Err(msg) = process_filename(i, &cli) {
-            eprintln!("{msg}");
+            error!("{}: {msg}", i.display());
         }
     }
 }
@@ -592,79 +529,67 @@ fn read_bytes<R: Read>(fd: &mut R, mut buf: &mut [u8]) -> io::Result<usize> {
     Ok(total)
 }
 
-fn write_bytes(file: &mut File, buf: &[u8]) -> io::Result<usize> {
-    let mut total = 0;
-    let mut len = buf.len();
-
-    while len > 0 {
-        match file.write(&buf[total..]) {
-            Ok(0) => {
-                // EOF reached
-                break;
-            }
-            Ok(n) => {
-                // If anything was written, accumulate it, and continue
-                total += n;
-                len -= n;
-            }
-            Err(ref e) if e.kind() == io::ErrorKind::Interrupted => {
-                // Interrupted, continue
-                continue;
-            }
-            Err(e) => {
-                // Return errors, unless we only were interrupted
-                return Err(e);
-            }
-        }
-    }
-
-    Ok(total)
-}
-
-fn overwrite_byte(rom0: &mut [u8], addr: u16, fixed_byte: u8, area_name: &str, overwrite: bool) {
+fn overwrite_byte(rom0: &mut [u8], addr: u16, fixed_byte: u8, area: &str, overwrite: bool) {
     let orig_byte = rom0[addr as usize];
 
     if !overwrite && orig_byte != 0 && orig_byte != fixed_byte {
-        eprintln!("warning: Overwrote a non-zero byte in the {}", area_name);
+        warn!("overwrote a non-zero byte in the {area}");
     }
 
     rom0[addr as usize] = fixed_byte;
 }
 
-fn overwrite_bytes(
+fn overwrite_prelude(
     rom0: &mut [u8],
-    start_addr: u16,
+    start_addr: usize,
     fixed: &[u8],
-    area_name: &str,
+    area: &str,
     overwrite: bool,
-) -> io::Result<()> {
-    if start_addr as usize + fixed.len() > rom0.len() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "Address or size out of bounds",
-        ));
+) {
+    if start_addr + fixed.len() >= rom0.len() {
+        panic!("attempted to overwrite a byte outside of ROM0");
     }
+
     if !overwrite {
         for (i, &byte) in fixed.iter().enumerate() {
-            if rom0[i + start_addr as usize] != 0 && rom0[i + start_addr as usize] != byte {
-                println!("warning: Overwrote a non-zero byte in the {}", area_name);
+            if rom0[i + start_addr] != 0 && rom0[i + start_addr] != byte {
+                warn!("overwrote a non-zero byte in the {area}");
                 break;
             }
         }
     }
-    rom0[start_addr as usize..start_addr as usize + fixed.len()].copy_from_slice(fixed);
-    Ok(())
+}
+
+fn overwrite_bytes(rom0: &mut [u8], start_addr: u16, fixed: &[u8], area: &str, overwrite: bool) {
+    let start_addr = start_addr as usize;
+    overwrite_prelude(rom0, start_addr, fixed, area, overwrite);
+    rom0[start_addr..start_addr + fixed.len()].copy_from_slice(fixed);
+}
+
+fn overwrite_inverted_bytes(
+    rom0: &mut [u8],
+    start_addr: u16,
+    fixed: &[u8],
+    area: &str,
+    overwrite: bool,
+) {
+    let start_addr = start_addr as usize;
+    overwrite_prelude(rom0, start_addr, fixed, area, overwrite);
+
+    for (dest, source) in rom0[start_addr..start_addr + fixed.len()]
+        .iter_mut()
+        .zip(fixed)
+    {
+        *dest = *source ^ 0xFF
+    }
 }
 
 fn process_file(
     input: &mut File,
     output: &mut File,
-    path: impl AsRef<Path>,
     file_size: u64,
     options: &Cli,
-) -> io::Result<()> {
-    let path = path.as_ref().display();
-
+) -> Result<(), Error> {
     // Check if the file is seekable
     /* TODO: I have no idea what these checks are doing, so I disabled them. Check this.
     if true || input.as_raw_fd() == output.as_raw_fd() {
@@ -674,14 +599,8 @@ fn process_file(
     }
     */
 
-    let mut rom0 = [0u8; BANK_SIZE];
-    let mut rom0_len = match read_bytes(input, &mut rom0) {
-        Ok(corr_len) => corr_len,
-        Err(e) => {
-            eprintln!("Invalid file input: {e}");
-            process::exit(1);
-        }
-    };
+    let mut rom0 = [0; BANK_SIZE];
+    let mut rom0_len = read_bytes(input, &mut rom0)?;
 
     let header_size = if matches!(&options.mbc_type, Some(MbcType::Tpp1 { .. })) {
         0x154
@@ -690,13 +609,10 @@ fn process_file(
     };
 
     if rom0_len < header_size {
-        eprintln!(
-            "FATAL: \"{path}\" too short, expected at least {header_size} bytes, got only {rom0_len}",
-        );
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "File too short",
-        ));
+        return Err(Error::TooShort {
+            expected: header_size,
+            got: rom0_len,
+        });
     }
 
     match options.fix_spec.logo {
@@ -706,14 +622,14 @@ fn process_file(
             &NINTENDO_LOGO,
             "Nintendo logo",
             options.overwrite,
-        )?,
-        Some(FixState::Trash) => overwrite_bytes(
+        ),
+        Some(FixState::Trash) => overwrite_inverted_bytes(
             &mut rom0,
             0x0104,
-            &TRASH_LOGO,
+            &NINTENDO_LOGO,
             "Nintendo logo",
             options.overwrite,
-        )?,
+        ),
         None => (),
     }
 
@@ -724,7 +640,7 @@ fn process_file(
             title.as_bytes(),
             "title",
             options.overwrite,
-        )?;
+        );
     }
 
     if let Some(game_id) = &options.game_id {
@@ -734,7 +650,7 @@ fn process_file(
             game_id.as_bytes(),
             "manufacturer code",
             options.overwrite,
-        )?;
+        );
     }
 
     if options.model.both() {
@@ -750,7 +666,7 @@ fn process_file(
             new_licensee.as_bytes(),
             "new licensee code",
             options.overwrite,
-        )?;
+        );
     }
 
     if options.sgb_compatible {
@@ -788,7 +704,7 @@ fn process_file(
             &tpp1_code,
             "TPP1 identification code",
             options.overwrite,
-        )?;
+        );
 
         overwrite_bytes(
             &mut rom0[..],
@@ -796,7 +712,7 @@ fn process_file(
             &tpp1_rev,
             "TPP1 revision number",
             options.overwrite,
-        )?;
+        );
 
         if let Some(ram_size) = ram_size {
             overwrite_byte(
@@ -849,8 +765,8 @@ fn process_file(
             options.overwrite,
         );
     } else if options.sgb_compatible && rom0[0x14B] != 0x33 {
-        eprintln!(
-            "warning: SGB compatibility enabled, but old licensee was 0x{:02x}, not 0x33",
+        warn!(
+            "SGB compatibility enabled, but old licensee was 0x{:02x}, not 0x33",
             rom0[0x14B]
         );
     }
@@ -875,8 +791,7 @@ fn process_file(
     /* input.as_raw_fd() == output.as_raw_fd() */
     {
         if file_size >= (0x10000 * BANK_SIZE) as u64 {
-            eprintln!("FATAL: \"{path}\" has more than 65536 banks");
-            return Ok(());
+            return Err(Error::TooManyBanks(file_size / BANK_SIZE as u64));
         }
         // This should be guaranteed from the size cap...
         // Rust doesn't have static_assert in the same way C++ does, but we can use compile-time checks with const assertions
@@ -1004,19 +919,14 @@ fn process_file(
             &bytes,
             "global checksum",
             options.overwrite,
-        )?;
+        );
     }
-
-    let mut write_len: usize;
 
     // In case the output depends on the input, reset to the beginning of the file, and only
     // write the header
     /* if true || input.as_raw_fd() == output.as_raw_fd() */
     {
-        if let Err(e) = output.seek(io::SeekFrom::Start(0)) {
-            eprintln!("FATAL: Failed to rewind \"{path}\": {e}");
-            return Ok(());
-        }
+        output.seek(io::SeekFrom::Start(0))?;
         // If modifying the file in-place, we only need to edit the header
         // However, padding may have modified ROM0 (added padding), so don't in that case
         if options.pad_value.is_some() {
@@ -1024,32 +934,18 @@ fn process_file(
         }
     }
 
-    write_len = write_bytes(output, &rom0[..rom0_len])?;
-
-    if (write_len) < rom0_len {
-        eprintln!("FATAL: Could only write {write_len} of \"{path}\"'s {rom0_len} ROM0 bytes");
-        return Err(io::Error::new(io::ErrorKind::UnexpectedEof, ""));
-    }
+    output.write_all(&rom0[..rom0_len])?;
 
     // Output ROMX if it was buffered
     if !romx.is_empty() {
-        write_len = write_bytes(output, &romx[..total_romx_len])?;
-        if (write_len) < total_romx_len {
-            eprintln!(
-                "FATAL: Could only write {write_len} of \"{path}\"'s {total_romx_len} ROMX bytes",
-            );
-            return Err(io::Error::new(io::ErrorKind::UnexpectedEof, ""));
-        }
+        output.write_all(&romx[..total_romx_len])?;
     }
 
     // Output padding
     if options.pad_value.is_some() {
         /* if true || input.as_raw_fd() == output.as_raw_fd() */
         {
-            if let Err(e) = output.seek(io::SeekFrom::End(0)) {
-                eprintln!("FATAL: Failed to seek to end of \"{path}\": {e}");
-                return Err(io::Error::new(io::ErrorKind::InvalidInput, ""));
-            }
+            output.seek(io::SeekFrom::End(0))?;
         }
         bank.fill(options.pad_value.unwrap());
         let mut len = (nb_banks - 1) * BANK_SIZE as u32 - total_romx_len as u32; // Don't count ROM0!
@@ -1060,12 +956,7 @@ fn process_file(
             } else {
                 len as usize
             };
-            write_len = write_bytes(output, &bank[..this_len])?;
-
-            if write_len != this_len {
-                eprintln!("FATAL: Failed to write \"{path}\"'s padding");
-                break;
-            }
+            output.write_all(&bank[..this_len])?;
             len -= this_len as u32;
         }
     }
@@ -1073,43 +964,28 @@ fn process_file(
     Ok(())
 }
 
-fn process_filename(path: impl AsRef<Path>, options: &Cli) -> io::Result<bool> {
+fn process_filename(path: impl AsRef<Path>, options: &Cli) -> Result<(), Error> {
     let path = path.as_ref();
 
-    let mut nb_errors = 0;
     let mut file = OpenOptions::new().read(true).write(true).open(path)?;
     let mut temp_file = file.try_clone()?; //TOCHECK: This could be plain wrong, check what output file actually does in process_File
     if path == Path::new("-") {
         //TOCHECK: Make SURE only [u8] are used in processing to avoid Windows OS translating newline characters.
-        process_file(&mut file, &mut temp_file, path, 0, options)?;
+        process_file(&mut file, &mut temp_file, 0, options)?;
     } else {
         let metadata = file.metadata()?;
         if !metadata.is_file() {
-            eprintln!(
-                "FATAL: \"{}\" is not a regular file, and thus cannot be modified in-place",
-                path.display()
-            );
-            nb_errors += 1;
-        } else if metadata.len() < 0x150 {
-            eprintln!(
-                "FATAL: \"{}\" too short, expected at least 336 ($150) bytes, got only {}",
-                path.display(),
-                metadata.len()
-            );
-            nb_errors += 1;
-        } else {
-            process_file(&mut file, &mut temp_file, path, metadata.len(), options)?;
+            return Err(Error::IrregularFile);
         }
+        if metadata.len() < 0x150 {
+            return Err(Error::TooShort {
+                expected: 336,
+                // This cast is safe because anything under 336 will always fit in `usize`.
+                got: metadata.len() as usize,
+            });
+        }
+        process_file(&mut file, &mut temp_file, metadata.len(), options)?;
     }
 
-    if nb_errors > 0 {
-        eprintln!(
-            "Fixing \"{}\" failed with {} error{}",
-            path.display(),
-            nb_errors,
-            if nb_errors == 1 { "" } else { "s" }
-        );
-    }
-
-    Ok(nb_errors == 0)
+    Ok(())
 }
