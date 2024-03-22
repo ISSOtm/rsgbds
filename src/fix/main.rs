@@ -181,7 +181,9 @@ static NINTENDO_LOGO: [u8; 48] = [
 ];
 
 fn main() {
-    tracing_subscriber::fmt::init();
+    tracing_subscriber::fmt()
+        .event_format(tracing_subscriber::fmt::format().without_time().compact())
+        .init();
     let mut cli = Cli::parse();
 
     // TODO: move this to clap.
