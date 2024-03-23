@@ -325,6 +325,35 @@ macro_rules! define_codes {
                     $($value => $name,)+
                 }
             }
+
+            fn from_name(name: &str) -> Result<Self, ParseError> {
+                type M = MbcType;
+                type R = RamBattery;
+                #[allow(unused_parens)]
+                match name {
+                    $(stringify!($name) => Ok($value),)+
+                    _ => Err(ParseError::Bad),
+                }
+            }
+        }
+
+        impl FromStr for MbcType {
+            type Err = ParseError;
+
+            fn from_str(s: &str) -> Result<Self, Self::Err> {
+                if s.chars().next().unwrap().is_ascii_digit() || s.starts_with('$') {
+                    let base = if s.starts_with('$') { 16 } else { 10 };
+                    let mbc = u16::from_str_radix(s.trim_start_matches('$'), base)
+                        .map_err(|_| ParseError::Bad)?;
+                    if mbc > 0xFF {
+                        return Err(ParseError::BadRange);
+                    }
+                    return Ok(MbcType::from_code(mbc));
+                }
+                else {
+                    return MbcType::from_name(s);
+                }
+            }
         }
     };
 }
@@ -496,24 +525,6 @@ enum ParseError {
     BadRange,
 }
 
-impl FromStr for MbcType {
-    type Err = ParseError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if s.chars().next().unwrap().is_ascii_digit() || s.starts_with('$') {
-            let base = if s.starts_with('$') { 16 } else { 10 };
-            let mbc = u16::from_str_radix(s.trim_start_matches('$'), base)
-                .map_err(|_| ParseError::Bad)?;
-            if mbc > 0xFF {
-                return Err(ParseError::BadRange);
-            }
-            return Ok(MbcType::from_code(mbc));
-        }
-
-        Err(ParseError::Bad)
-    }
-}
-
 fn read_bytes<R: Read>(fd: &mut R, mut buf: &mut [u8]) -> io::Result<usize> {
     let mut total = 0;
     while !buf.is_empty() {
@@ -592,15 +603,6 @@ fn process_file(
     file_size: u64,
     options: &Cli,
 ) -> Result<(), Error> {
-    // Check if the file is seekable
-    /* TODO: I have no idea what these checks are doing, so I disabled them. Check this.
-    if true || input.as_raw_fd() == output.as_raw_fd() {
-        assert!(file_size != 0);
-    } else {
-        assert!(file_size == 0);
-    }
-    */
-
     let mut rom0 = [0; BANK_SIZE];
     let mut rom0_len = read_bytes(input, &mut rom0)?;
 
@@ -697,9 +699,8 @@ fn process_file(
 
     if let Some(cartridge_type @ MbcType::Tpp1 { .. }) = options.mbc_type {
         let tpp1_code = vec![0xC1, 0x65];
-        let tpp1_rev = vec![0xC1, 0x65]; // TODO WARNING PLACEHOLDER NOT ACTUAL VALUES, PICK UP FROM OPTIONS INSTEAD?
+        let tpp1_rev = vec![0x1, 0x0];
 
-        // TODO: I don't understand this part. Tpp1_rev comes from tryReadSlice and I still don't understand very well what it does.
         overwrite_bytes(
             &mut rom0[..],
             0x149,
@@ -795,10 +796,6 @@ fn process_file(
         if file_size >= (0x10000 * BANK_SIZE) as u64 {
             return Err(Error::TooManyBanks(file_size / BANK_SIZE as u64));
         }
-        // This should be guaranteed from the size cap...
-        // Rust doesn't have static_assert in the same way C++ does, but we can use compile-time checks with const assertions
-        // TOCHECK: I need this assert explained to me, it always fails
-        // const _: () = assert!(0x10000 * BANK_SIZE <= std::mem::size_of::<usize>());
         // Compute number of banks and ROMX len from file size
         nb_banks = ((file_size + (BANK_SIZE - 1) as u64) / BANK_SIZE as u64) as u32;
         total_romx_len = if file_size >= BANK_SIZE as u64 {
@@ -806,38 +803,7 @@ fn process_file(
         } else {
             0
         };
-    } /* else if rom0_len == BANK_SIZE {
-          // Copy ROMX when reading a pipe, and we're not at EOF yet
-          loop {
-              romx.resize((nb_banks * BANK_SIZE as u32) as usize, 0); // Initialize new elements to 0
-              let bank_len = read_bytes(
-                  input,
-                  &mut romx[((nb_banks - 1) * BANK_SIZE as u32) as usize..],
-              )?;
-
-              // Update bank count, ONLY IF at least one byte was read
-              if bank_len > 0 {
-                  // We're gonna read another bank, check that it won't be too much
-                  // TOCHECK: same thing as the previous one
-                  // const _: () = assert!(0x10000 * BANK_SIZE <= std::mem::size_of::<usize>());
-                  if nb_banks == 0x10000 {
-                      eprintln!("FATAL: \"{}\" has more than 65536 banks", name);
-                      return Ok(());
-                  }
-                  nb_banks += 1;
-
-                  // Update global checksum, too
-                  for i in 0..bank_len {
-                      global_sum += romx[total_romx_len + i] as u16;
-                  }
-                  total_romx_len += bank_len;
-              }
-              // Stop when an incomplete bank has been read
-              if bank_len != BANK_SIZE {
-                  break;
-              }
-          }
-      } */
+    } 
 
     if let Some(pad_value) = options.pad_value {
         // We want at least 2 banks
@@ -864,10 +830,7 @@ fn process_file(
         // Write final ROM size
         rom0[0x148] = (nb_banks / 2).trailing_zeros() as u8;
         // Alter global checksum based on how many bytes will be added (not counting ROM0)
-
-        let intermediate_result = ((nb_banks - 1) * BANK_SIZE as u32 - total_romx_len as u32) as u8; //TOCHECK This also uses the wrapping mult, assuming C++ was exploiting overflow on purpose
-        let result = pad_value.wrapping_mul(intermediate_result);
-        global_sum += result as u16;
+        global_sum += pad_value.wrapping_mul(((nb_banks - 1) * BANK_SIZE as u32 - total_romx_len as u32) as u8) as u16;
     }
 
     // Handle the header checksum after the ROM size has been written
@@ -889,7 +852,6 @@ fn process_file(
     }
 
     if options.fix_spec.global.is_some() {
-        // TODO: Why is this an assert? shouldn't this be a runtime error?
         assert!(rom0_len >= 0x14E, "ROM0 length must be at least 0x14E");
         for i in rom0[0..0x14E].iter().chain(rom0[0x150..rom0_len].iter()) {
             global_sum = global_sum.wrapping_add(*i as u16);
@@ -972,7 +934,6 @@ fn process_filename(path: impl AsRef<Path>, options: &Cli) -> Result<(), Error> 
     let mut file = OpenOptions::new().read(true).write(true).open(path)?;
     let mut temp_file = file.try_clone()?; //TOCHECK: This could be plain wrong, check what output file actually does in process_File
     if path == Path::new("-") {
-        //TOCHECK: Make SURE only [u8] are used in processing to avoid Windows OS translating newline characters.
         process_file(&mut file, &mut temp_file, 0, options)?;
     } else {
         let metadata = file.metadata()?;
