@@ -331,7 +331,7 @@ macro_rules! define_codes {
                 type R = RamBattery;
                 #[allow(unused_parens)]
                 match name {
-                    $(stringify!($name) => Ok($value),)+
+                    $($name => Ok($value),)+
                     _ => Err(ParseError::Bad),
                 }
             }
@@ -348,10 +348,10 @@ macro_rules! define_codes {
                     if mbc > 0xFF {
                         return Err(ParseError::BadRange);
                     }
-                    return MbcType::from_code(mbc);
+                    MbcType::from_code(mbc)
                 }
                 else {
-                    return MbcType::from_name(s);
+                    MbcType::from_name(s)
                 }
             }
         }
@@ -405,7 +405,7 @@ define_codes! {
         timer: false,
         battery: false,
     }),
-    (0x103, "TPP1+MULTIRUMBLE") => (M::Tpp1 {
+    (0x103, "TPP1+RUMBLE+MULTIRUMBLE") => (M::Tpp1 {
         rumble: true,
         multi_rumble: true,
         timer: false,
@@ -429,7 +429,7 @@ define_codes! {
         timer: true,
         battery: false,
     }),
-    (0x107, "TPP1+TIMER+MULTIRUMBLE") => (M::Tpp1 {
+    (0x107, "TPP1+TIMER+RUMBLE+MULTIRUMBLE") => (M::Tpp1 {
         rumble: true,
         multi_rumble: true,
         timer: true,
@@ -453,7 +453,7 @@ define_codes! {
         timer: false,
         battery: true,
     }),
-    (0x10B, "TPP1+BATTERY+MULTIRUMBLE") => (M::Tpp1 {
+    (0x10B, "TPP1+BATTERY+RUMBLE+MULTIRUMBLE") => (M::Tpp1 {
         rumble: true,
         multi_rumble: true,
         timer: false,
@@ -477,7 +477,7 @@ define_codes! {
         timer: true,
         battery: true,
     }),
-    (0x10F, "TPP1+BATTERY+TIMER+MULTIRUMBLE") => (M::Tpp1 {
+    (0x10F, "TPP1+BATTERY+TIMER+RUMBLE+MULTIRUMBLE") => (M::Tpp1 {
         rumble: true,
         multi_rumble: true,
         timer: true,
