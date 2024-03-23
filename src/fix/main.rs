@@ -306,13 +306,13 @@ macro_rules! define_codes {
                 }
             }
 
-            fn from_code(mbc_type: u16) -> MbcType {
+            fn from_code(mbc_type: u16) -> Result<Self, ParseError> {
                 type M = MbcType;
                 type R = RamBattery;
                 #[allow(unused_parens)]
                 match mbc_type {
-                    $($code => $value,)+
-                    _ => todo!(),
+                    $($code => Ok($value),)+
+                    _ => Err(ParseError::Bad),
                 }
             }
 
@@ -348,7 +348,7 @@ macro_rules! define_codes {
                     if mbc > 0xFF {
                         return Err(ParseError::BadRange);
                     }
-                    return Ok(MbcType::from_code(mbc));
+                    return MbcType::from_code(mbc);
                 }
                 else {
                     return MbcType::from_name(s);
