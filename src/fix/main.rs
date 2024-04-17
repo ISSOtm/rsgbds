@@ -791,19 +791,16 @@ fn process_file(
     let mut global_sum = 0; // Global checksum variable
 
     // Handle ROMX
-    /* input.as_raw_fd() == output.as_raw_fd() */
-    {
-        if file_size >= (0x10000 * BANK_SIZE) as u64 {
-            return Err(Error::TooManyBanks(file_size / BANK_SIZE as u64));
-        }
-        // Compute number of banks and ROMX len from file size
-        nb_banks = ((file_size + (BANK_SIZE - 1) as u64) / BANK_SIZE as u64) as u32;
-        total_romx_len = if file_size >= BANK_SIZE as u64 {
-            (file_size - BANK_SIZE as u64) as usize
-        } else {
-            0
-        };
-    } 
+    if file_size >= (0x10000 * BANK_SIZE) as u64 {
+        return Err(Error::TooManyBanks(file_size / BANK_SIZE as u64));
+    }
+    // Compute number of banks and ROMX len from file size
+    nb_banks = ((file_size + (BANK_SIZE - 1) as u64) / BANK_SIZE as u64) as u32;
+    total_romx_len = if file_size >= BANK_SIZE as u64 {
+        (file_size - BANK_SIZE as u64) as usize
+    } else {
+        0
+    };
 
     if let Some(pad_value) = options.pad_value {
         // We want at least 2 banks
@@ -857,17 +854,14 @@ fn process_file(
             global_sum = global_sum.wrapping_add(*i as u16);
         }
         // Pipes have already read ROMX and updated global_sum, but not regular files
-        /* if true || input.as_raw_fd() == output.as_raw_fd() */
-        {
-            loop {
-                let bank_len = read_bytes(input, &mut bank)?;
+        loop {
+            let bank_len = read_bytes(input, &mut bank)?;
 
-                for i in bank.into_iter().take(bank_len) {
-                    global_sum = global_sum.wrapping_add(i as u16);
-                }
-                if bank_len != BANK_SIZE {
-                    break;
-                }
+            for i in bank.into_iter().take(bank_len) {
+                global_sum = global_sum.wrapping_add(i as u16);
+            }
+            if bank_len != BANK_SIZE {
+                break;
             }
         }
 
@@ -888,14 +882,11 @@ fn process_file(
 
     // In case the output depends on the input, reset to the beginning of the file, and only
     // write the header
-    /* if true || input.as_raw_fd() == output.as_raw_fd() */
-    {
-        output.seek(io::SeekFrom::Start(0))?;
-        // If modifying the file in-place, we only need to edit the header
-        // However, padding may have modified ROM0 (added padding), so don't in that case
-        if options.pad_value.is_some() {
-            rom0_len = header_size;
-        }
+    output.seek(io::SeekFrom::Start(0))?;
+    // If modifying the file in-place, we only need to edit the header
+    // However, padding may have modified ROM0 (added padding), so don't in that case
+    if options.pad_value.is_some() {
+        rom0_len = header_size;
     }
 
     output.write_all(&rom0[..rom0_len])?;
@@ -907,10 +898,7 @@ fn process_file(
 
     // Output padding
     if options.pad_value.is_some() {
-        /* if true || input.as_raw_fd() == output.as_raw_fd() */
-        {
-            output.seek(io::SeekFrom::End(0))?;
-        }
+        output.seek(io::SeekFrom::End(0))?;
         bank.fill(options.pad_value.unwrap());
         let mut len = (nb_banks - 1) * BANK_SIZE as u32 - total_romx_len as u32; // Don't count ROM0!
 
