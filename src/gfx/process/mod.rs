@@ -316,7 +316,7 @@ fn collect_color_sets(
     let mut color_sets = Vec::new();
     let mut attrmap = Vec::with_capacity(frame.image().height() * frame.image().width());
 
-    'tiles: for tile in slice.iter_tiles(frame) {
+    'tiles: for tile in slice.iter_tiles(frame, options.column_major) {
         attrmap.push(AttrmapEntry::default());
         let attrs = attrmap.last_mut().unwrap();
 

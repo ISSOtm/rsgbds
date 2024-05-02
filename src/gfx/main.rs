@@ -527,8 +527,9 @@ impl InputSlice {
     fn iter_tiles<'frame, 'img: 'frame>(
         &self,
         frame: &'frame Frame<'img, Rgb32, DynImage32>,
+        colum_major: bool,
     ) -> TileIter<'frame, 'img, '_> {
-        TileIter::new(frame, self)
+        TileIter::new(frame, self, colum_major)
     }
 }
 
@@ -545,6 +546,7 @@ struct TileIter<'frame, 'img: 'frame, 'slice> {
     slice: &'slice InputSlice,
     dx: u16,
     dy: u16,
+    column_major: bool,
 }
 
 impl<'img> Tile<'_, 'img> {
@@ -554,12 +556,17 @@ impl<'img> Tile<'_, 'img> {
 }
 
 impl<'frame, 'img: 'frame, 'slice> TileIter<'frame, 'img, 'slice> {
-    fn new(frame: &'frame Frame<'img, Rgb32, DynImage32>, slice: &'slice InputSlice) -> Self {
+    fn new(
+        frame: &'frame Frame<'img, Rgb32, DynImage32>,
+        slice: &'slice InputSlice,
+        column_major: bool,
+    ) -> Self {
         Self {
             frame,
             slice,
             dx: 0,
             dy: 0,
+            column_major,
         }
     }
 }
@@ -569,19 +576,26 @@ impl<'frame, 'img: 'frame> Iterator for TileIter<'frame, 'img, '_> {
 
     fn next(&mut self) -> Option<Self::Item> {
         let (width, height) = (self.slice.width.get(), self.slice.height.get());
-        if self.dy == height {
-            return None;
-        }
-
         let tile = Tile {
             frame: self.frame,
             x: self.dx * 8,
             y: self.dy * 8,
         };
-        self.dx += 1;
-        if self.dx == width {
-            self.dx = 0;
-            self.dy += 1;
+
+        let coords = if self.column_major {
+            (&mut self.dx, width, &mut self.dy, height)
+        } else {
+            (&mut self.dy, height, &mut self.dx, width)
+        };
+
+        if *coords.2 == coords.3 {
+            return None;
+        }
+
+        *coords.0 += 1;
+        if *coords.0 == coords.1 {
+            *coords.0 = 0;
+            *coords.2 += 1;
         }
         Some(tile)
     }

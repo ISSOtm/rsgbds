@@ -26,8 +26,14 @@ pub(super) fn generate_unique_tiles(
     let mut tiles = Vec::new();
 
     let mut tile_ids = HashMap::new();
-    debug_assert_eq!(input_slice.iter_tiles(frame).count(), attrmap.len());
-    for (tile, attr) in input_slice.iter_tiles(frame).zip(attrmap) {
+    debug_assert_eq!(
+        input_slice.iter_tiles(frame, options.column_major).count(),
+        attrmap.len()
+    );
+    for (tile, attr) in input_slice
+        .iter_tiles(frame, options.column_major)
+        .zip(attrmap)
+    {
         let tile_data = TileData::new(
             &tile,
             &palettes[mappings[attr.color_set_id]],

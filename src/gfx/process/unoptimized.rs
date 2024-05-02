@@ -32,9 +32,12 @@ pub(super) fn output_tile_data(
     if let Some(remaining_tiles) =
         (usize::from(width_in_tiles) * usize::from(height_in_tiles)).checked_sub(options.trim)
     {
-        debug_assert_eq!(input_slice.iter_tiles(frame).count(), attrmap.len());
+        debug_assert_eq!(
+            input_slice.iter_tiles(frame, options.column_major).count(),
+            attrmap.len()
+        );
         for (tile, attr) in input_slice
-            .iter_tiles(frame)
+            .iter_tiles(frame, options.column_major)
             .zip(attrmap)
             .take(remaining_tiles)
         {
