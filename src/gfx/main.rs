@@ -2,7 +2,7 @@
 
 use clap::Parser;
 use plumers::{
-    color::{Rgb16, Rgb32},
+    color::Rgb32,
     image::{DynImage32, Frame},
 };
 use std::{fmt::Debug, num::NonZeroU16, path::PathBuf, process::ExitCode};

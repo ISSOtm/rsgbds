@@ -108,7 +108,9 @@ impl Rgba {
                     // TODO: I wonder if this can be done without float math
                     let green_linear = (self.green as f64 / 255.).powf(2.2);
                     let blue_linear = (self.blue as f64 / 255.).powf(2.2);
-                    let green_adjusted = ((green_linear * 4. - blue_linear) / 3.).clamp(0., 1.);
+                    // Originally: ((green_linear * 4. - blue_linear) / 3.).clamp(0., 1.)
+                    let green_adjusted =
+                        (green_linear * (4. / 3.) - blue_linear * (1. / 3.)).clamp(0., 1.);
 
                     let green = (green_adjusted.powf(1. / 2.2) * 255.) as u8;
                     (

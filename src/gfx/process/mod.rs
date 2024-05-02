@@ -81,13 +81,12 @@ pub(crate) fn process(
         }
     };
 
-    let (image_colors, has_transparency) =
-        collect_image_colors(&image, &slice, &options, reporter)?;
+    let (image_colors, has_transparency) = collect_image_colors(&image, &slice, options, reporter)?;
 
     // This is done unconditionally because it validates the image (which we want to perform even
     // if no output is requested), and because it's necessary to generate any output (except an
     // un-dedup'd tilemap, but that's acceptable).
-    let (color_sets, mut attrmap) = collect_color_sets(&frame, &slice, &options, has_transparency)?;
+    let (color_sets, mut attrmap) = collect_color_sets(&frame, &slice, options, has_transparency)?;
 
     let (mappings, palettes) = match pal_spec {
         Some(PalSpec::Embedded) => {
@@ -113,7 +112,7 @@ pub(crate) fn process(
         Some(PalSpec::Explicit(spec)) => {
             make_palettes_as_specified(&spec, &color_sets, has_transparency)?
         }
-        None => generate_palettes(&color_sets, &options, has_transparency),
+        None => generate_palettes(&color_sets, options, has_transparency),
     };
 
     // A lot of later operations depend on correct palette generation, so if the latter went wrong,
@@ -129,7 +128,7 @@ pub(crate) fn process(
     }
 
     if let Some(path) = &options.palettes_path {
-        output_palettes(&palettes, path, &options)?;
+        output_palettes(&palettes, path, options)?;
     }
 
     if !options.allow_dedup {
@@ -141,12 +140,12 @@ pub(crate) fn process(
             &palettes,
             &mappings,
             &slice,
-            &options,
+            options,
             has_transparency,
         );
 
         if let Some(path) = &options.output_path {
-            optimized::output_tile_data(&tile_data, path, &options)?;
+            optimized::output_tile_data(&tile_data, path, options)?;
         }
 
         if let Some(path) = &options.tilemap_path {
@@ -183,7 +182,7 @@ pub(crate) fn process(
                 &mappings,
                 path,
                 &slice,
-                &options,
+                options,
                 has_transparency,
             )?;
         }
@@ -192,7 +191,7 @@ pub(crate) fn process(
             || options.attrmap_path.is_some()
             || options.palmap_path.is_some()
         {
-            unoptimized::output_maps(&attrmap, &mappings, &options)?;
+            unoptimized::output_maps(&attrmap, &mappings, options)?;
         }
     }
 
