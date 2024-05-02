@@ -2,7 +2,7 @@
 name = "rgbds"
 version = "0.1.0"
 edition = "2021"
-#rust-version = "1.73" # 1.74 will drop support for older Apple platforms we wish to keep supporting.
+rust-version = "1.73" # 1.74 will drop support for older Apple platforms we wish to keep supporting.
 description = "The premier Game Boy assembly toolchain"
 homepage = "https://rgbds.gbdev.io"
 repository = "https://github.com/gbdev/rgbds"
@@ -12,16 +12,25 @@ categories = ["command-line-utilities", "development-tools::debugging", "game-de
 
 # TODO: move bin-only deps to separate features.
 [dependencies] # TODO: audit deps & features
+argfile = "0.1.0"
+arrayvec = "0.7.4"
+bitvec = "1.0.1"
+clap = { version = "4.4", features = ["derive", "wrap_help"] }
 codespan-reporting = "0.11.1"
+concolor = "0.1.1"
+concolor-clap = "0.1.0"
+funty = "2.0.0"
 keyword-trie-gen = { path = "keyword-trie-gen" }
 lalrpop-util = "0.19.8"
 memmap2 = "0.5.8"
 parse-display = { version = "0.6.0", default-features = false }
+plumers = { path = "../plumers/plumers" }
 # TODO: maybe use feature `inline-more`
 string-interner = { version = "0.14.0", default-features = false, features = ["std","backends"] }
 take_mut = "0.2.2"
 try-from-discrim = "1.0.0"
 warnings-gen = { path = "warnings-gen" }
+wild = "2.2.1"
 
 [build-dependencies]
 lalrpop = { version = "0.19.8", default-features = false }
@@ -29,6 +38,10 @@ lalrpop = { version = "0.19.8", default-features = false }
 [[bin]]
 name = "rgbasm"
 path = "src/asm/main.rs"
+
+[[bin]]
+name = "rgbgfx"
+path = "src/gfx/main.rs"
 
 [workspace]
 members = ["keyword-trie-gen", "warnings-gen"]
