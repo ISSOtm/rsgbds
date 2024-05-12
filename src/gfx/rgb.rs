@@ -22,7 +22,7 @@ impl From<Rgba> for Rgb {
 /// Format the color using CSS notation (`#13579b`).
 impl Display for Rgb {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "#{:x}{:x}{:x}", self.red, self.green, self.blue)
+        write!(f, "#{:02x}{:02x}{:02x}", self.red, self.green, self.blue)
     }
 }
 
@@ -58,6 +58,17 @@ impl From<Rgb32> for Rgba {
             green,
             blue,
             alpha,
+        }
+    }
+}
+
+impl From<Rgb> for Rgba {
+    fn from(Rgb { red, green, blue }: Rgb) -> Self {
+        Self {
+            red,
+            green,
+            blue,
+            alpha: 0xFF,
         }
     }
 }

@@ -75,7 +75,10 @@ mod impls {
             for ch in format!("{keyword}").chars() {
                 let upper = ch.to_ascii_uppercase();
                 let Some(res) = chars_string.chars().enumerate().find(|(_, c)| *c == upper) else {
-                    return Err(Error::new_spanned(keyword, "Keyword contains a character not in the character set"));
+                    return Err(Error::new_spanned(
+                        keyword,
+                        "Keyword contains a character not in the character set",
+                    ));
                 };
                 let index = res.0;
 

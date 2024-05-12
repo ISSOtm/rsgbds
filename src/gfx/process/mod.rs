@@ -10,7 +10,7 @@ use crate::{
     error::Reporter,
     palette::Palette,
     rgb::{Opacity, Rgb, Rgba},
-    Diagnostic, InputSlice, Options, PalSpec, Tile,
+    Diagnostic, InputSlice, Options, PalSpec,
 };
 
 mod optimized;
@@ -223,7 +223,7 @@ fn collect_image_colors(
 
     for y in 0..usize::from(slice.height.get()) * 8 {
         for x in 0..usize::from(slice.width.get()) * 8 {
-            let rgba = Rgba::from(*image.pixel(0, x, y));
+            let rgba = Rgba::from(image.pixel(0, x, y));
             match rgba.opacity() {
                 None => {
                     ambiguous_alpha_pos.push((x, y));
@@ -278,7 +278,7 @@ fn collect_image_colors(
     let mut image_colors = match image.palette() {
         Some(pal) => Vec::with_capacity(pal.len()),
         None => Vec::with_capacity(
-            usize::from(options.nb_colors_per_pal) * usize::from(options.nb_palettes),
+            usize::from(options.nb_colors_per_pal.get()) * usize::from(options.nb_palettes),
         ),
     };
     for (cgb_color, slot) in cgb_colors.iter().enumerate() {
@@ -467,14 +467,14 @@ fn make_palettes_as_specified(
 
 fn output_palettes(palettes: &[Palette], path: &Path, options: &Options) -> Result<(), Diagnostic> {
     let mut output = File::create(path)
-        .map_err(|err| file_error(format!("Failed to create palette file: {err}"), path))?;
+        .map_err(|err| crate::file_error(format!("Failed to create palette file: {err}"), path))?;
 
     for palette in palettes {
-        for i in 0..usize::from(options.nb_colors_per_pal) {
+        for i in 0..usize::from(options.nb_colors_per_pal.get()) {
             let color = palette.colors.get(i).copied().unwrap_or(Rgba::TRANSPARENT);
-            output
-                .write_all(&color.0.to_le_bytes())
-                .map_err(|err| file_error(format!("Failed to write palettes: {err}"), path))?;
+            output.write_all(&color.0.to_le_bytes()).map_err(|err| {
+                crate::file_error(format!("Failed to write palettes: {err}"), path)
+            })?;
         }
     }
 
@@ -670,12 +670,6 @@ impl std::hash::Hash for TileData {
     }
 }
 
-fn file_error<S: Into<String>, P: AsRef<Path>>(err_msg: S, path: P) -> Diagnostic {
-    Diagnostic::error()
-        .with_message(err_msg)
-        .with_notes(vec![format!("File path: {}", path.as_ref().display())])
-}
-
 struct ColorList<'a>(&'a Rgb, &'a Vec<Rgb>);
 
 impl Display for ColorList<'_> {
@@ -686,5 +680,83 @@ impl Display for ColorList<'_> {
             write!(f, "{color}, ")?;
         }
         write!(f, "and {}", self.0)
+    }
+}
+
+impl InputSlice {
+    fn iter_tiles<'frame, 'img: 'frame>(
+        &self,
+        frame: &'frame Frame<'img, Rgb32, DynImage32>,
+        column_major: bool,
+    ) -> TileIter<'frame, 'img, '_> {
+        TileIter::new(frame, self, column_major)
+    }
+}
+
+#[derive(Debug, Clone)]
+struct Tile<'frame, 'img: 'frame> {
+    frame: &'frame Frame<'img, Rgb32, DynImage32>,
+    x: u16,
+    y: u16,
+}
+
+#[derive(Debug, Clone)]
+struct TileIter<'frame, 'img: 'frame, 'slice> {
+    frame: &'frame Frame<'img, Rgb32, DynImage32>,
+    slice: &'slice InputSlice,
+    dx: u16,
+    dy: u16,
+    column_major: bool,
+}
+
+impl<'img> Tile<'_, 'img> {
+    fn pixel(&self, x: u8, y: u8) -> Rgb32 {
+        self.frame.pixel(x.into(), y.into())
+    }
+}
+
+impl<'frame, 'img: 'frame, 'slice> TileIter<'frame, 'img, 'slice> {
+    fn new(
+        frame: &'frame Frame<'img, Rgb32, DynImage32>,
+        slice: &'slice InputSlice,
+        column_major: bool,
+    ) -> Self {
+        Self {
+            frame,
+            slice,
+            dx: 0,
+            dy: 0,
+            column_major,
+        }
+    }
+}
+
+impl<'frame, 'img: 'frame> Iterator for TileIter<'frame, 'img, '_> {
+    type Item = Tile<'frame, 'img>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let (width, height) = (self.slice.width.get(), self.slice.height.get());
+        let tile = Tile {
+            frame: self.frame,
+            x: self.dx * 8,
+            y: self.dy * 8,
+        };
+
+        let coords = if self.column_major {
+            (&mut self.dx, width, &mut self.dy, height)
+        } else {
+            (&mut self.dy, height, &mut self.dx, width)
+        };
+
+        if *coords.2 == coords.3 {
+            return None;
+        }
+
+        *coords.0 += 1;
+        if *coords.0 == coords.1 {
+            *coords.0 = 0;
+            *coords.2 += 1;
+        }
+        Some(tile)
     }
 }

@@ -24,7 +24,7 @@ pub(super) fn output_tile_data(
     has_transparency: bool,
 ) -> Result<(), Diagnostic> {
     let mut output = File::create(path).map_err(|err| {
-        super::file_error(format!("Failed to create tile data file: {err}"), path)
+        crate::file_error(format!("Failed to create tile data file: {err}"), path)
     })?;
 
     let width_in_tiles = input_slice.width.get() / 8;
@@ -51,7 +51,7 @@ pub(super) fn output_tile_data(
                 output
                     .write_all(&bitplanes[..usize::from(options.bit_depth)])
                     .map_err(|err| {
-                        super::file_error(format!("Failed to write tile data: {err}"), path)
+                        crate::file_error(format!("Failed to write tile data: {err}"), path)
                     })?;
             }
         }
@@ -73,7 +73,7 @@ pub(super) fn output_maps(
             .map(|path| {
                 File::create(path)
                     .map_err(|err| {
-                        super::file_error(format!("Failed to create {what} file: {err}"), path)
+                        crate::file_error(format!("Failed to create {what} file: {err}"), path)
                     })
                     .map(|file| (path, file))
             })
@@ -87,7 +87,7 @@ pub(super) fn output_maps(
     let mut bank = 0;
     for attr in attrmap {
         if let Some(max_nb_tiles) = options.max_nb_tiles {
-            if tile_id == max_nb_tiles[usize::from(bank)] {
+            if u16::from(tile_id) == max_nb_tiles[usize::from(bank)] {
                 debug_assert_eq!(bank, 0);
                 bank = 1;
                 tile_id = 0;
@@ -98,7 +98,7 @@ pub(super) fn output_maps(
             opt.as_mut()
                 .map_or(Ok(()), |(path, output): &mut (&PathBuf, File)| {
                     output.write_all(&[byte]).map_err(|err| {
-                        super::file_error(format!("Failed to write {what}: {err}"), path)
+                        crate::file_error(format!("Failed to write {what}: {err}"), path)
                     })
                 })
         };

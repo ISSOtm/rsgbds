@@ -186,7 +186,7 @@ pub enum AsmErrorKind {
     BadOptBLen(usize),
     #[display("Option 'g' expects its argument to be exactly 4 characters, not {0}")]
     BadOptGLen(usize),
-    #[display("Bad arguemnt for option '{0}': {1}")]
+    #[display("Bad argument for option '{0}': {1}")]
     BadOptArg(char, ParseNumError<u16>),
     #[display("Option '{0}' does not take an argument")]
     UnexpectedOptArg(char),

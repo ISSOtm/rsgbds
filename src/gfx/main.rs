@@ -1,11 +1,52 @@
 /* SPDX-License-Identifier: MPL-2.0 */
 
+#![deny(
+    clippy::undocumented_unsafe_blocks,
+    unsafe_op_in_unsafe_fn,
+    unused_unsafe
+)]
+
 use clap::Parser;
-use plumers::{
-    color::Rgb32,
-    image::{DynImage32, Frame},
+
+use std::{
+    fmt::{Debug, Display},
+    io::Read,
+    num::{NonZeroU16, NonZeroU8},
+    path::{Path, PathBuf},
+    process::ExitCode,
 };
-use std::{fmt::Debug, num::NonZeroU16, path::PathBuf, process::ExitCode};
+
+fn main() -> ExitCode {
+    // TODO: not convinced that `argfile` handles at-files the way we document...
+    let args = argfile::expand_args_from(wild::args_os(), argfile::parse_fromfile, argfile::PREFIX)
+        .expect("Failed to expand command-line args");
+    let cli = Cli::parse_from(args);
+    let mut reporter = Reporter::new(match &cli.color.color {
+        concolor_clap::ColorChoice::Auto => codespan_reporting::term::termcolor::ColorChoice::Auto,
+        concolor_clap::ColorChoice::Always => {
+            codespan_reporting::term::termcolor::ColorChoice::Always
+        }
+        concolor_clap::ColorChoice::Never => {
+            codespan_reporting::term::termcolor::ColorChoice::Never
+        }
+    });
+    let (options, pal_spec) = match cli.finish() {
+        Ok((opt, spec)) => (opt, spec),
+        Err(diag) => {
+            reporter.report(&diag);
+            return ExitCode::FAILURE;
+        }
+    };
+
+    // TODO: verbosity easter egg
+
+    if let Err(diag) = run(options, pal_spec, &mut reporter) {
+        reporter.report(&diag);
+        return ExitCode::FAILURE;
+    }
+
+    ExitCode::SUCCESS
+}
 
 mod color_set;
 mod error;
@@ -14,8 +55,33 @@ use error::Reporter;
 mod pal_packing;
 mod palette;
 mod process;
+mod reverse;
 mod rgb;
 use rgb::Rgb;
+
+fn run(
+    options: Options,
+    pal_spec: Option<PalSpec>,
+    reporter: &mut Reporter,
+) -> Result<(), Diagnostic> {
+    if let Some(&width) = &options.reversed_width.as_ref() {
+        reverse::reverse(width, &options, pal_spec, reporter)
+    } else if let Some(input_path) = &options.input_path {
+        process::process(input_path, &options, pal_spec, reporter)
+    } else if let Some(palettes_path) = &options.palettes_path {
+        match pal_spec.expect("The CLI should enforce either an input path or a pal spec!") {
+            PalSpec::Embedded => Err(Diagnostic::error()
+                .with_message("An embedded color spec cannot be used without an input image")),
+            PalSpec::Explicit(pal_specs) => {
+                process::process_palettes_only(&pal_specs, palettes_path, &options)
+            }
+        }
+    } else {
+        Err(Diagnostic::error().with_message(
+            "To dump the color spec to a file, please specify that file's path with `-p`",
+        ))
+    }
+}
 
 mod cli {
     #![deny(missing_docs)]
@@ -36,15 +102,11 @@ mod cli {
         version,
         about = "Game Boy graphics converter",
         long_about = "Converts images into data suitable for display on the Game Boy and Game Boy Color, or vice-versa.",
-        after_help = "For comprehensive help, run `man rgbgfx`, or go to http://rgbds.gbdev.io/docs/"
+        after_help = "For comprehensive help, run `man rgbgfx`, or go to http://rgbds.gbdev.io/docs/",
+        arg_required_else_help = true,
+        help_expected = true
     )]
     pub(super) struct Cli {
-        /// Write a map of GBC tile attributes to <path>
-        #[arg(short, long, value_name = "path")]
-        pub(super) attr_map: Option<PathBuf>,
-        /// Write a map of GBC tile attributes to a pre-determined location
-        #[arg(short = 'A', long, conflicts_with = "attr_map")]
-        pub(super) auto_attr_map: bool,
         /// ID to assign to the first tile generated in each bank
         #[arg(short, long, default_value_t = [0, 0].into())]
         pub(super) base_tiles: NumList<u8, 2>,
@@ -68,47 +130,31 @@ mod cli {
         #[arg(short, long)]
         pub(super) mirror_tiles: bool,
         /// Maximum number of tiles to generate for each bank
+        // TODO: fail parsing if the value is > 256!
         #[arg(short = 'N', long)]
-        pub(super) nb_tiles: Option<NumList<u8, 2>>,
+        pub(super) nb_tiles: Option<NumList<u16, 2>>,
         /// Limit how many palettes can be generated
-        #[arg(short, long, default_value_t = 8, value_name = "nb of palettes", value_parser = parse_number::<u8>)]
-        pub(super) nb_palettes: u8,
-        /// Place files written through `--auto-*` options next to the tile data, instead of the image
-        #[arg(short = 'O', long, requires = "output")]
-        pub(super) group_outputs: bool,
-        /// Write tile data to <path>
-        #[arg(short, long, value_name = "path")]
-        pub(super) output: Option<PathBuf>,
-        /// Write GBC palettes to <path>
-        #[arg(short, long, value_name = "path")]
-        pub(super) palette: Option<PathBuf>,
-        /// Write GBC palettes to a pre-determined location
-        #[arg(short = 'P', long, conflicts_with = "palette")]
-        pub(super) auto_palette: bool,
-        /// Write a map of palette IDs to <path>
-        #[arg(short = 'q', long, value_name = "path")]
-        pub(super) palette_map: Option<PathBuf>,
-        /// Write a map of palette IDs to a pre-determined location
-        #[arg(short = 'Q', long, conflicts_with = "palette_map")]
-        pub(super) auto_palette_map: bool,
+        // TODO: fail parsing if the value is > 256!
+        #[arg(short, long, default_value_t = 8, value_name = "nb of palettes", value_parser = parse_number::<u16>)]
+        pub(super) nb_palettes: u16,
         /// Attempt to re-create a source image from binary data
         ///
         /// Note that this makes the input become an output, and outputs become inputs!
-        // TODO: width, or stride?
         // TODO: this ought to require a few args: input file, probably tile data?
-        #[arg(short, long, value_name = "image width (in tiles)")]
+        #[arg(
+            short,
+            long,
+            value_name = "image width (in tiles)",
+            requires = "output"
+        )]
         pub(super) reverse: Option<NonZeroU16>,
         /// Limit how many opaque colors each palette contains
         ///
         /// If applicable, this limit does not include the slot reserved for transparency!
+        ///
+        /// [default: <max size for bit depth, see --depth>]
         #[arg(short = 's', long, value_name = "nb of colors", value_parser = parse_number::<u8>)]
         pub(super) palette_size: Option<u8>,
-        /// Write a map of tile IDs to <path>
-        #[arg(short, long, value_name = "path")]
-        pub(super) tilemap: Option<PathBuf>,
-        /// Write a map of tile IDs to a pre-determined location
-        #[arg(short = 'T', long, conflicts_with = "tilemap")]
-        pub(super) auto_tilemap: bool,
         // TODO: implement gbdev/rgbds#1005...
         //#[arg(short = 'U', long)]
         //pub(super) unit_size: ???,
@@ -121,15 +167,66 @@ mod cli {
         #[arg(short, long, action = clap::ArgAction::Count)]
         pub(super) verbose: u8,
         /// Skip emitting the last <nb> tiles' data
-        #[arg(short = 'x', long, default_value_t = 0, value_name = "nb of tiles", value_parser = parse_number::<usize>)]
+        #[arg(short = 'x', long, default_value_t = 0, value_name = "nb of tiles", value_parser = parse_number::<usize>, hide_default_value = true)]
         pub(super) trim_end: usize,
         /// Scan the image column by column, instead of row by row
         #[arg(short = 'Z', long)]
         pub(super) columns: bool,
 
+        /// Place files written through `--auto-*` options next to the tile data, instead of the image
+        #[arg(help_heading = "Output files", short = 'O', long, requires = "output")]
+        pub(super) group_outputs: bool,
+        /// Write a map of GBC tile attributes to <path>
+        #[arg(help_heading = "Output files", short, long, value_name = "path")]
+        pub(super) attr_map: Option<PathBuf>,
+        /// Write a map of GBC tile attributes to a pre-determined location
+        #[arg(
+            help_heading = "Output files",
+            short = 'A',
+            long,
+            conflicts_with = "attr_map"
+        )]
+        pub(super) auto_attr_map: bool,
+        /// Write tile data to <path>
+        #[arg(help_heading = "Output files", short, long, value_name = "path")]
+        pub(super) output: Option<PathBuf>,
+        /// Write GBC palettes to <path>
+        #[arg(help_heading = "Output files", short, long, value_name = "path")]
+        pub(super) palette: Option<PathBuf>,
+        /// Write GBC palettes to a pre-determined location
+        #[arg(
+            help_heading = "Output files",
+            short = 'P',
+            long,
+            conflicts_with = "palette"
+        )]
+        pub(super) auto_palette: bool,
+        /// Write a map of palette IDs to <path>
+        #[arg(help_heading = "Output files", short = 'q', long, value_name = "path")]
+        pub(super) palette_map: Option<PathBuf>,
+        /// Write a map of palette IDs to a pre-determined location
+        #[arg(
+            help_heading = "Output files",
+            short = 'Q',
+            long,
+            conflicts_with = "palette_map"
+        )]
+        pub(super) auto_palette_map: bool,
+        /// Write a map of tile IDs to <path>
+        #[arg(help_heading = "Output files", short, long, value_name = "path")]
+        pub(super) tilemap: Option<PathBuf>,
+        /// Write a map of tile IDs to a pre-determined location
+        #[arg(
+            help_heading = "Output files",
+            short = 'T',
+            long,
+            conflicts_with = "tilemap"
+        )]
+        pub(super) auto_tilemap: bool,
+
         /// Path to the image to convert
         // TODO: should be required if any auto-path is requested, unless `-O` is set
-        #[arg(value_name = "path to image")]
+        #[arg(value_name = "path to image", required_unless_present = "colors")]
         pub(super) input: Option<PathBuf>,
     }
 
@@ -314,24 +411,6 @@ mod cli {
         }
     }
 
-    #[derive(Debug, Clone, Copy)]
-    struct Nth(usize);
-    impl Display for Nth {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            write!(
-                f,
-                "{}{}",
-                self.0,
-                match self.0 % 10 {
-                    1 => "st",
-                    2 => "nd",
-                    3 => "rd",
-                    _ => "th",
-                }
-            )
-        }
-    }
-
     impl Cli {
         pub(super) fn finish(self) -> Result<(Options, Option<super::PalSpec>), Diagnostic> {
             let pal_spec = self.colors.map(|pal_spec| match pal_spec {
@@ -339,6 +418,25 @@ mod cli {
                 PalSpec::Embedded => super::PalSpec::Embedded,
                 PalSpec::External { fmt, path } => todo!(),
             });
+
+            let max_nb_colors_per_pal = 1 << self.depth;
+            let nb_colors_per_pal = NonZeroU8::new(match self.palette_size {
+                Some(size) => {
+                    if size > max_nb_colors_per_pal {
+                        return Err(Diagnostic::error()
+                            .with_message(format!(
+                                "{}bpp palettes cannot contain {size} colors",
+                                self.depth
+                            ))
+                            .with_notes(vec![format!("The maximum is {max_nb_colors_per_pal}")]));
+                    }
+                    size
+                }
+                None => max_nb_colors_per_pal,
+            })
+            .ok_or_else(|| {
+                Diagnostic::error().with_message("Palettes cannot contain zero colors")
+            })?;
 
             fn auto_path(
                 auto: bool,
@@ -403,8 +501,7 @@ mod cli {
                     bit_depth: self.depth,
                     input_slice: self.slice,
                     nb_palettes: self.nb_palettes,
-                    // TODO: cap at bit depth
-                    nb_colors_per_pal: self.palette_size.unwrap_or(1 << self.depth),
+                    nb_colors_per_pal,
                     trim: self.trim_end,
                     base_tile_ids: self.base_tiles.finish(|_i| 0),
                     max_nb_tiles: self
@@ -417,59 +514,6 @@ mod cli {
     }
 }
 use cli::*;
-
-fn main() -> ExitCode {
-    // TODO: not convinced that `argfile` handles at-files the way we document...
-    let args = argfile::expand_args_from(wild::args_os(), argfile::parse_fromfile, argfile::PREFIX)
-        .expect("Failed to expand command-line args");
-    let cli = Cli::parse_from(args);
-    let mut reporter = Reporter::new(match &cli.color.color {
-        concolor_clap::ColorChoice::Auto => codespan_reporting::term::termcolor::ColorChoice::Auto,
-        concolor_clap::ColorChoice::Always => {
-            codespan_reporting::term::termcolor::ColorChoice::Always
-        }
-        concolor_clap::ColorChoice::Never => {
-            codespan_reporting::term::termcolor::ColorChoice::Never
-        }
-    });
-    let (options, pal_spec) = match cli.finish() {
-        Ok((opt, spec)) => (opt, spec),
-        Err(diag) => {
-            reporter.report(&diag);
-            return ExitCode::FAILURE;
-        }
-    };
-
-    // TODO: verbosity easter egg
-
-    if let Err(diag) = run(options, pal_spec, &mut reporter) {
-        reporter.report(&diag);
-        return ExitCode::FAILURE;
-    }
-
-    ExitCode::SUCCESS
-}
-
-fn run(
-    options: Options,
-    pal_spec: Option<PalSpec>,
-    reporter: &mut Reporter,
-) -> Result<(), Diagnostic> {
-    if let Some(width) = &options.reversed_width {
-        todo!();
-    } else if let Some(input_path) = &options.input_path {
-        process::process(input_path, &options, pal_spec, reporter)
-    } else if let (Some(palette_path), Some(pal_spec)) = (&options.palettes_path, pal_spec) {
-        match pal_spec {
-            PalSpec::Embedded => Err(todo!()),
-            PalSpec::Explicit(pal_specs) => {
-                process::process_palettes_only(&pal_specs, palette_path, &options)
-            }
-        }
-    } else {
-        Err(todo!())
-    }
-}
 
 #[derive(Debug, Clone)]
 struct Options {
@@ -489,12 +533,12 @@ struct Options {
     column_major: bool,
     bit_depth: u8,
     input_slice: Option<InputSlice>,
-    nb_palettes: u8,
-    nb_colors_per_pal: u8,
+    nb_palettes: u16,
+    nb_colors_per_pal: NonZeroU8,
     trim: usize,
 
     base_tile_ids: [u8; 2],
-    max_nb_tiles: Option<[u8; 2]>,
+    max_nb_tiles: Option<[u16; 2]>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -516,88 +560,65 @@ struct InputSlice {
 impl Options {
     pub fn colors_per_palette(&self, has_transparency: bool) -> u8 {
         if has_transparency {
-            self.nb_colors_per_pal - 1
+            self.nb_colors_per_pal.get() - 1
         } else {
-            self.nb_colors_per_pal
+            self.nb_colors_per_pal.get()
         }
     }
 }
 
-impl InputSlice {
-    fn iter_tiles<'frame, 'img: 'frame>(
-        &self,
-        frame: &'frame Frame<'img, Rgb32, DynImage32>,
-        colum_major: bool,
-    ) -> TileIter<'frame, 'img, '_> {
-        TileIter::new(frame, self, colum_major)
-    }
+// Little convenience utilities.
+
+fn file_error<S: Into<String>, P: AsRef<Path>>(err_msg: S, path: P) -> Diagnostic {
+    Diagnostic::error()
+        .with_message(err_msg)
+        .with_notes(vec![format!("File path: {}", path.as_ref().display())])
 }
 
-#[derive(Debug, Clone)]
-struct Tile<'frame, 'img: 'frame> {
-    frame: &'frame Frame<'img, Rgb32, DynImage32>,
-    x: u16,
-    y: u16,
-}
+fn try_reading<R: Read>(mut buf: &mut [u8], mut from: R) -> std::io::Result<Option<()>> {
+    use std::io::ErrorKind;
 
-#[derive(Debug, Clone)]
-struct TileIter<'frame, 'img: 'frame, 'slice> {
-    frame: &'frame Frame<'img, Rgb32, DynImage32>,
-    slice: &'slice InputSlice,
-    dx: u16,
-    dy: u16,
-    column_major: bool,
-}
-
-impl<'img> Tile<'_, 'img> {
-    fn pixel(&self, x: u8, y: u8) -> Rgb32 {
-        self.frame.pixel(x.into(), y.into())
-    }
-}
-
-impl<'frame, 'img: 'frame, 'slice> TileIter<'frame, 'img, 'slice> {
-    fn new(
-        frame: &'frame Frame<'img, Rgb32, DynImage32>,
-        slice: &'slice InputSlice,
-        column_major: bool,
-    ) -> Self {
-        Self {
-            frame,
-            slice,
-            dx: 0,
-            dy: 0,
-            column_major,
+    let mut partial_read = false;
+    while !buf.is_empty() {
+        match from.read(buf) {
+            // Since the buffer is not empty, this can only signify EOF.
+            Ok(0) => {
+                if partial_read {
+                    return Err(ErrorKind::UnexpectedEof.into());
+                } else {
+                    return Ok(None);
+                }
+            }
+            Ok(n) => {
+                buf = &mut buf[n..];
+                partial_read = true;
+            }
+            Err(error) => {
+                if !matches!(error.kind(), ErrorKind::Interrupted) {
+                    return Err(error);
+                }
+            }
         }
     }
+
+    Ok(Some(()))
 }
 
-impl<'frame, 'img: 'frame> Iterator for TileIter<'frame, 'img, '_> {
-    type Item = Tile<'frame, 'img>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let (width, height) = (self.slice.width.get(), self.slice.height.get());
-        let tile = Tile {
-            frame: self.frame,
-            x: self.dx * 8,
-            y: self.dy * 8,
-        };
-
-        let coords = if self.column_major {
-            (&mut self.dx, width, &mut self.dy, height)
-        } else {
-            (&mut self.dy, height, &mut self.dx, width)
-        };
-
-        if *coords.2 == coords.3 {
-            return None;
-        }
-
-        *coords.0 += 1;
-        if *coords.0 == coords.1 {
-            *coords.0 = 0;
-            *coords.2 += 1;
-        }
-        Some(tile)
+#[derive(Debug, Clone, Copy)]
+struct Nth(usize);
+impl Display for Nth {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}{}",
+            self.0,
+            match self.0 % 10 {
+                1 => "st",
+                2 => "nd",
+                3 => "rd",
+                _ => "th",
+            }
+        )
     }
 }
 

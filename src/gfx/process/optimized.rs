@@ -91,14 +91,14 @@ pub(super) fn output_tile_data(
     options: &Options,
 ) -> Result<(), Diagnostic> {
     let mut output = File::create(path).map_err(|err| {
-        super::file_error(format!("Failed to create tile data file: {err}"), path)
+        crate::file_error(format!("Failed to create tile data file: {err}"), path)
     })?;
 
     let nb_tiles = tile_data.len().saturating_sub(options.trim);
     for tile in &tile_data[..nb_tiles] {
         output
             .write_all(&tile.bytes)
-            .map_err(|err| super::file_error(format!("Failed to write tile data: {err}"), path))?;
+            .map_err(|err| crate::file_error(format!("Failed to write tile data: {err}"), path))?;
     }
 
     Ok(())
@@ -106,12 +106,12 @@ pub(super) fn output_tile_data(
 
 pub(super) fn output_tilemap(attrmap: &[AttrmapEntry], path: &Path) -> Result<(), Diagnostic> {
     let mut output = File::create(path)
-        .map_err(|err| super::file_error(format!("Failed to create tilemap file: {err}"), path))?;
+        .map_err(|err| crate::file_error(format!("Failed to create tilemap file: {err}"), path))?;
 
     for attr in attrmap {
         output
             .write_all(&[attr.tile_id])
-            .map_err(|err| super::file_error(format!("Failed to write tilemap: {err}"), path))?;
+            .map_err(|err| crate::file_error(format!("Failed to write tilemap: {err}"), path))?;
     }
 
     Ok(())
@@ -123,7 +123,7 @@ pub(super) fn output_attrmap(
     path: &Path,
 ) -> Result<(), Diagnostic> {
     let mut output = File::create(path).map_err(|err| {
-        super::file_error(format!("Failed to create attribute map file: {err}"), path)
+        crate::file_error(format!("Failed to create attribute map file: {err}"), path)
     })?;
 
     for attr in attrmap {
@@ -133,7 +133,7 @@ pub(super) fn output_attrmap(
                 | (attr.bank as u8) << 3
                 | attr.get_pal_id(mappings) as u8 & 7])
             .map_err(|err| {
-                super::file_error(format!("Failed to write attribute map: {err}"), path)
+                crate::file_error(format!("Failed to write attribute map: {err}"), path)
             })?;
     }
 
@@ -146,14 +146,14 @@ pub(super) fn output_palmap(
     path: &Path,
 ) -> Result<(), Diagnostic> {
     let mut output = File::create(path).map_err(|err| {
-        super::file_error(format!("Failed to create palette map file: {err}"), path)
+        crate::file_error(format!("Failed to create palette map file: {err}"), path)
     })?;
 
     for attr in attrmap {
         output
             .write_all(&[attr.get_pal_id(mappings) as u8])
             .map_err(|err| {
-                super::file_error(format!("Failed to write palette map: {err}"), path)
+                crate::file_error(format!("Failed to write palette map: {err}"), path)
             })?;
     }
 
