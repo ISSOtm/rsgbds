@@ -231,11 +231,18 @@ fn collect_image_colors(
                 }
                 Some(Opacity::Opaque) => {
                     let cgb_color = rgba.cgb_color(options.use_color_curve);
+                    let rgb = Rgb::from(rgba);
                     // The array is correctly sized for all opaque colors, so the index is in bounds.
                     let slot = &mut cgb_colors[usize::from(cgb_color.0)];
                     match slot {
-                        None => *slot = Some((Rgb::from(rgba), Vec::new())),
-                        Some((_first, conflicting)) => conflicting.push(Rgb::from(rgba)),
+                        None => *slot = Some((rgb, Vec::new())),
+                        Some((first, conflicting)) => {
+                            if rgb != *first
+                                && conflicting.iter().copied().all(|member| rgb != member)
+                            {
+                                conflicting.push(rgb);
+                            }
+                        }
                     }
                 }
                 Some(Opacity::Transparent) => has_transparency = true,
