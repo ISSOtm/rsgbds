@@ -668,7 +668,9 @@ impl std::hash::Hash for TileData {
         let mut high = 0;
         for (y, factor) in FACTORS.iter().enumerate() {
             let incorporate_row = |hash: &mut u8, bitplane: u8| {
-                *hash = hash.wrapping_add(factor * std::cmp::max(bitplane, bitplane.reverse_bits()))
+                *hash = hash.wrapping_add(
+                    factor.wrapping_mul(std::cmp::max(bitplane, bitplane.reverse_bits())),
+                )
             };
             incorporate_row(&mut low, self.bytes[y * 2]);
             incorporate_row(&mut high, self.bytes[y * 2 + 1]);
