@@ -1,4 +1,4 @@
-use std::{fs::DirEntry, ops::Range, path::PathBuf, process::ExitCode};
+use std::{fmt::Display, fs::DirEntry, ops::Range, path::PathBuf, process::ExitCode};
 
 use libtest_mimic::{Arguments, Failed, Trial};
 use plumers::{image::ImageFormat, prelude::*};
@@ -150,7 +150,50 @@ fn randtilegen(input_path: PathBuf, rgbgfx_args: &[&str]) -> Result<(), Failed> 
     })?;
 
     // Compare the two images.
-    todo!();
+    debug_assert_eq!(image.nb_frames(), 1);
+    debug_assert_eq!(roundtripped.nb_frames(), 1);
+    if roundtripped.width() != image.width() {
+        return Err(format!(
+            "Image widths do not match!
+Expected {}
+     Got {}",
+            image.width(),
+            roundtripped.width()
+        )
+        .into());
+    }
+    if roundtripped.height() != image.height() {
+        return Err(format!(
+            "Image heights do not match!
+Expected {}
+     Got {}",
+            image.height(),
+            roundtripped.height()
+        )
+        .into());
+    }
+    let mut mismatches = Vec::new();
+    for y in 0..image.height() {
+        for x in 0..image.width() {
+            let is_transparent = |color: Rgb16| color.0 & 0x8000 == 0;
+            let mut expected = image.pixel(0, x, y);
+            expected.invert_alpha(); // randtilegen has inverted alpha.
+            let got = roundtripped.pixel(0, x, y);
+            // If both colors are transparent, ignore the RGB components.
+            // Otherwise (one of the two is not transparent), the colors must match exactly.
+            if (!is_transparent(expected) || !is_transparent(got)) && got != expected {
+                mismatches.push(ColorMismatch {
+                    x,
+                    y,
+                    expected,
+                    got,
+                });
+            }
+        }
+    }
+    ColorMismatches::new(mismatches)?;
+
+    Ok(())
 }
 
 fn make_random_image(randomness: Vec<u8>) -> DirectImage16 {
@@ -331,4 +374,51 @@ impl RandBits {
 struct Attributes {
     palette: u8,
     nb_colors: u8,
+}
+
+#[derive(Debug, Clone)]
+struct ColorMismatches(Vec<ColorMismatch>);
+
+impl ColorMismatches {
+    fn new(mismatches: Vec<ColorMismatch>) -> Result<(), Self> {
+        if mismatches.is_empty() {
+            Ok(())
+        } else {
+            Err(Self(mismatches))
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct ColorMismatch {
+    x: usize,
+    y: usize,
+    expected: Rgb16,
+    got: Rgb16,
+}
+
+impl Display for ColorMismatches {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(
+            f,
+            "Some colors mismatched after round-tripping!
+ X  |  Y  |  Expected |   Got
+ ---+-----+-----------+----------"
+        )?;
+        let mut mismatches = self.0.iter();
+        for ColorMismatch {
+            x,
+            y,
+            expected,
+            got,
+        } in mismatches.by_ref().take(30)
+        {
+            writeln!(f, "{x:>3} | {y:>3} | {expected} | {got}")?;
+        }
+        let nb_remaining = mismatches.count();
+        if nb_remaining != 0 {
+            writeln!(f, "... and {nb_remaining} more")?;
+        }
+        Ok(())
+    }
 }
