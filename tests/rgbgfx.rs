@@ -140,7 +140,7 @@ fn randtilegen(input_path: PathBuf, rgbgfx_args: &[&str]) -> Result<(), Failed> 
             sort_existing: false,
             reduce_palette: false,
         },
-        true,
+        AlphaMode::TransparentToOpaque,
     )
     .map_err(|err| {
         format!(
