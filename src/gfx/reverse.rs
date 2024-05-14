@@ -374,7 +374,7 @@ pub(super) fn reverse(
     };
     let image =
         // SAFETY: the closure initializes the entire image, just not per row of pixels, but by row of tiles.
-        unsafe { DirectImage16::new(1, usize::from(width.get()) * 8, height * 8, draw_image) };
+        unsafe { DirectImage16::new(ImageFormat::Png, 1, usize::from(width.get()) * 8, height * 8, draw_image) };
 
     let path = options
         .input_path
