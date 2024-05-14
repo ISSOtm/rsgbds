@@ -131,7 +131,7 @@ pub(crate) fn process(
         output_palettes(&palettes, path, options)?;
     }
 
-    if !options.allow_dedup {
+    if options.allow_dedup {
         // All of the "optimised" outputs require the deduplication process to be performed to be output.
         // (Except for the palette map, I guess.)
         let tile_data = optimized::generate_unique_tiles(
