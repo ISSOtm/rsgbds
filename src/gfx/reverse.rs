@@ -284,9 +284,9 @@ pub(super) fn reverse(
         Ok(palmap)
     }).transpose()?;
 
-    let row_width = width.get() * 8;
+    let row_width = usize::from(width.get()) * 8;
     let draw_image = |pixels: &mut [MaybeUninit<_>]| {
-        debug_assert_eq!(pixels.len(), usize::from(width.get()) * height);
+        debug_assert_eq!(pixels.len(), row_width * height * 8);
 
         for tile_y in 0..height {
             for tile_x in 0..usize::from(width.get()) {
@@ -346,7 +346,7 @@ pub(super) fn reverse(
                     let mut bitplane0 = get_plane(0);
                     let mut bitplane1 = get_plane(1);
 
-                    let row_ofs = (tile_y * 8 + y) * usize::from(width.get()) + tile_x * 8;
+                    let row_ofs = (tile_y * 8 + y) * row_width + tile_x * 8;
                     let pixel_row = &mut pixels[row_ofs..row_ofs + 8];
                     for x in 0..8 {
                         let bit0 = bitplane0 >> 7;
