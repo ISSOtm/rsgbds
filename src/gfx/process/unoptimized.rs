@@ -27,8 +27,8 @@ pub(super) fn output_tile_data(
         crate::file_error(format!("Failed to create tile data file: {err}"), path)
     })?;
 
-    let width_in_tiles = input_slice.width.get() / 8;
-    let height_in_tiles = input_slice.height.get() / 8;
+    let width_in_tiles = input_slice.width.get();
+    let height_in_tiles = input_slice.height.get();
     if let Some(remaining_tiles) =
         (usize::from(width_in_tiles) * usize::from(height_in_tiles)).checked_sub(options.trim)
     {
