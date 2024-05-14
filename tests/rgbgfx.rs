@@ -106,32 +106,31 @@ fn randtilegen(input_path: PathBuf, rgbgfx_args: &[&str]) -> Result<(), Failed> 
         )
     })?;
 
-    let files_args = [
-        "-o",
-        "result.2bpp",
-        "-p",
-        "result.pal",
-        "-a",
-        "result.attrmap",
-    ];
-    Command::new(RGBGFX_PATH)
-        .args(rgbgfx_args)
-        .args(files_args)
+    let with_file_args = |cmd: Command| {
+        cmd.arg("-o")
+            .arg(temp_dir_path.join("result.2bpp"))
+            .arg("-p")
+            .arg(temp_dir_path.join("result.pal"))
+            .arg("-a")
+            .arg(temp_dir_path.join("result.attrmap"))
+    };
+    with_file_args(Command::new(RGBGFX_PATH).args(rgbgfx_args))
         .arg(rand_img_path)
         .assert()
         .success()
         .stdout_eq([].as_slice())
         .stderr_eq([].as_slice());
     let roundtripped_img_path = temp_dir_path.join("roundtripped.png");
-    Command::new(RGBGFX_PATH)
-        .args(["-r", &(image.width() / 8).to_string()])
-        .args(rgbgfx_args)
-        .args(files_args)
-        .arg(&roundtripped_img_path)
-        .assert()
-        .success()
-        .stdout_eq([].as_slice())
-        .stderr_eq([].as_slice());
+    with_file_args(
+        Command::new(RGBGFX_PATH)
+            .args(["-r", &(image.width() / 8).to_string()])
+            .args(rgbgfx_args),
+    )
+    .arg(&roundtripped_img_path)
+    .assert()
+    .success()
+    .stdout_eq([].as_slice())
+    .stderr_eq([].as_slice());
 
     let roundtripped = DirectImage16::load(
         roundtripped_img_path.as_path(),
