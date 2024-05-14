@@ -129,7 +129,11 @@ pub(crate) fn pack_palettes(
     // "Decant" the result.
     decant(&mut assignments, color_sets, options, has_transparency);
     // The result doesn't contain any empty palettes.
-    debug_assert!(!assignments.iter().any(AssignedSets::is_empty));
+    debug_assert_eq!(
+        assignments.iter().position(AssignedSets::is_empty),
+        None,
+        "{assignments:?}",
+    );
 
     let mut mappings = vec![0; color_sets.len()];
     for (i, palette) in assignments.iter().enumerate() {
