@@ -206,7 +206,7 @@ fn make_random_image(randomness: Vec<u8>) -> DirectImage16 {
 
                 for y in 0..8 {
                     for x in 0..8 {
-                        pixels[(tile_y + y) * width + tile_x + x]
+                        pixels[(tile_y + y) * width * 8 + tile_x + x]
                             .write(Rgb16(palette[usize::from(tile[y][x])]));
                     }
                 }
