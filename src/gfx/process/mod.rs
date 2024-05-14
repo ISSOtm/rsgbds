@@ -407,9 +407,9 @@ fn generate_palettes(
 
     // Sort colors in the generated palettes.
     for palette in &mut palettes {
-        fn luminance(color: &Rgb16) -> u16 {
+        fn luminance(color: &Rgb16) -> u32 {
             let (red, green, blue, _alpha) = color.decode();
-            2126 * u16::from(red) + 7152 * u16::from(green) + 722 * u16::from(blue)
+            2126 * u32::from(red) + 7152 * u32::from(green) + 722 * u32::from(blue)
         }
         palette.colors.sort_unstable_by_key(luminance);
     }
@@ -648,6 +648,8 @@ impl Eq for TileData {}
 /// Finally, notice that each bitplane is hashed independently into a [`u8`],
 /// which are combined into the final [`u16`] hash.
 /// This performs better than trying to combine the bitplanes in any way, since the bitplanes are essentially independent.
+///
+/// Since tile data has a fixed size, there is no need to write an extra byte to avoid prefix collisions.
 impl std::hash::Hash for TileData {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         /// These factors are picked so that combinations of them (by addition) don't share common factors.
