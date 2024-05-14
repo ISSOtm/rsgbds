@@ -39,7 +39,7 @@ pub(crate) fn pack_palettes(
                 |(best_pal_index, best_rel_size), (i, assignment)| {
                     // Can't use `std::min_by_key` because floats are not `Ord`.
                     // TODO: use `OrdFloat` instead.
-                    let rel_size = assignment.relative_size_of(set);
+                    let rel_size = assignment.relative_size_of(set, color_sets);
                     if rel_size < best_rel_size {
                         (i, rel_size)
                     } else {
@@ -53,9 +53,11 @@ pub(crate) fn pack_palettes(
             best_pal.assign(attrs);
 
             // If this overloads the palette, get it back to normal (if possible).
-            while best_pal.volume() > options.colors_per_palette(has_transparency).into() {
+            while best_pal.volume(color_sets) > options.colors_per_palette(has_transparency).into()
+            {
                 // Look for a set minimising "efficiency" (i.e. size / rel_size).
-                let efficiency = |set: &ColorSet| set.len() as f64 / best_pal.relative_size_of(set);
+                let efficiency =
+                    |set: &ColorSet| set.len() as f64 / best_pal.relative_size_of(set, color_sets);
 
                 let mut efficiencies =
                     best_pal.assigned.iter().enumerate().filter_map(|(i, opt)| {
@@ -99,13 +101,13 @@ pub(crate) fn pack_palettes(
             }
         } else {
             // Found nowhere to put it, create a new palette containing just that set.
-            assignments.push(AssignedSets::with_attrs(color_sets, [attrs]));
+            assignments.push(AssignedSets::with_attrs([attrs]));
         }
     }
 
     // Deal with palettes still overloaded, by emptying them into the queue.
     for palette in &mut assignments {
-        if palette.volume() > options.colors_per_palette(has_transparency).into() {
+        if palette.volume(color_sets) > options.colors_per_palette(has_transparency).into() {
             for attrs in &mut palette.assigned.iter_mut().filter_map(Option::take) {
                 queue.push_back(attrs);
             }
@@ -117,10 +119,10 @@ pub(crate) fn pack_palettes(
         let set = &color_sets[attrs.set_idx];
         match assignments
             .iter_mut()
-            .find(|palette| palette.can_fit(set, options, has_transparency))
+            .find(|palette| palette.can_fit(set, color_sets, options, has_transparency))
         {
             Some(palette) => palette.assign(attrs),
-            None => assignments.push(AssignedSets::with_attrs(color_sets, [attrs])),
+            None => assignments.push(AssignedSets::with_attrs([attrs])),
         }
     }
 
@@ -176,6 +178,7 @@ fn decant(
         if to.combined_volume(
             from.iter()
                 .flat_map(|set| color_sets[set.set_idx].iter().copied()),
+            color_sets,
         ) <= options.colors_per_palette(has_transparency).into()
         {
             for opt in from.assigned.iter_mut() {
@@ -219,7 +222,7 @@ fn decant(
                 }
             }
 
-            if to.combined_volume(colors.iter().copied())
+            if to.combined_volume(colors.iter().copied(), color_sets)
                 <= options.colors_per_palette(has_transparency).into()
             {
                 // Iterate through the component's color sets, and transfer them.
@@ -234,7 +237,12 @@ fn decant(
     decant_on(assignments, |to, from| {
         for slot in &mut from.assigned {
             if let Some(attrs) = slot.take() {
-                if to.can_fit(&color_sets[attrs.set_idx], options, has_transparency) {
+                if to.can_fit(
+                    &color_sets[attrs.set_idx],
+                    color_sets,
+                    options,
+                    has_transparency,
+                ) {
                     to.assign(attrs);
                 } else {
                     // Put the attribute back in.
@@ -255,11 +263,9 @@ struct ColorSetAttrs {
 /// A collection of color sets assigned to a palette.
 /// Does not contain the actual color indices, because we need to be able to remove elements from it.
 #[derive(Debug)]
-struct AssignedSets<'sets> {
+struct AssignedSets {
     // We leave room for emptied slots, to avoid copying the structs around on removal.
     assigned: Vec<Option<ColorSetAttrs>>,
-    // For resolving color set indices.
-    color_sets: &'sets [ColorSet],
 }
 
 impl ColorSetAttrs {
@@ -284,14 +290,10 @@ impl ColorSetAttrs {
     }
 }
 
-impl<'sets> AssignedSets<'sets> {
-    fn with_attrs<It: IntoIterator<Item = ColorSetAttrs>>(
-        color_sets: &'sets [ColorSet],
-        attrs: It,
-    ) -> Self {
+impl AssignedSets {
+    fn with_attrs<It: IntoIterator<Item = ColorSetAttrs>>(attrs: It) -> Self {
         Self {
             assigned: attrs.into_iter().map(Some).collect(),
-            color_sets,
         }
     }
 
@@ -318,30 +320,36 @@ impl<'sets> AssignedSets<'sets> {
         self.iter().count()
     }
 
-    fn unique_colors(&self) -> HashSet<Rgb16> {
-        self.color_sets
+    fn unique_colors(&self, color_sets: &[ColorSet]) -> HashSet<Rgb16> {
+        color_sets
             .iter()
             .flat_map(|set| set.iter())
             .copied()
             .collect()
     }
 
-    fn volume(&self) -> usize {
-        self.unique_colors().len()
+    fn volume(&self, color_sets: &[ColorSet]) -> usize {
+        self.unique_colors(color_sets).len()
     }
 
-    fn can_fit(&self, set: &ColorSet, options: &Options, has_transparency: bool) -> bool {
-        let mut unique_colors = self.unique_colors();
+    fn can_fit(
+        &self,
+        set: &ColorSet,
+        color_sets: &[ColorSet],
+        options: &Options,
+        has_transparency: bool,
+    ) -> bool {
+        let mut unique_colors = self.unique_colors(color_sets);
         unique_colors.extend(set.iter().copied());
         unique_colors.len() <= options.colors_per_palette(has_transparency).into()
     }
 
-    fn relative_size_of(&self, set: &ColorSet) -> f64 {
+    fn relative_size_of(&self, set: &ColorSet, color_sets: &[ColorSet]) -> f64 {
         set.iter().fold(0., |rel_size, &color| {
             let n = self
                 .iter()
                 .filter(|attrs| {
-                    self.color_sets[attrs.set_idx]
+                    color_sets[attrs.set_idx]
                         .iter()
                         .any(|&candidate| candidate == color)
                 })
@@ -353,8 +361,12 @@ impl<'sets> AssignedSets<'sets> {
         })
     }
 
-    fn combined_volume<It: IntoIterator<Item = Rgb16>>(&self, iter: It) -> usize {
-        let mut unique_colors = self.unique_colors();
+    fn combined_volume<It: IntoIterator<Item = Rgb16>>(
+        &self,
+        iter: It,
+        color_sets: &[ColorSet],
+    ) -> usize {
+        let mut unique_colors = self.unique_colors(color_sets);
         unique_colors.extend(iter);
         unique_colors.len()
     }
