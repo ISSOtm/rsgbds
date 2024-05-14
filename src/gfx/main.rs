@@ -21,14 +21,10 @@ fn main() -> ExitCode {
     let args = argfile::expand_args_from(wild::args_os(), argfile::parse_fromfile, argfile::PREFIX)
         .expect("Failed to expand command-line args");
     let cli = Cli::parse_from(args);
-    let mut reporter = Reporter::new(match &cli.color.color {
-        concolor_clap::ColorChoice::Auto => codespan_reporting::term::termcolor::ColorChoice::Auto,
-        concolor_clap::ColorChoice::Always => {
-            codespan_reporting::term::termcolor::ColorChoice::Always
-        }
-        concolor_clap::ColorChoice::Never => {
-            codespan_reporting::term::termcolor::ColorChoice::Never
-        }
+    let mut reporter = Reporter::new(if concolor::get(concolor::Stream::Stderr).color() {
+        codespan_reporting::term::termcolor::ColorChoice::Always
+    } else {
+        codespan_reporting::term::termcolor::ColorChoice::Never
     });
     let (options, pal_spec) = match cli.finish() {
         Ok((opt, spec)) => (opt, spec),
