@@ -35,6 +35,10 @@ wild = "2.2.1"
 [build-dependencies]
 lalrpop = { version = "0.19.8", default-features = false }
 
+[dev-dependencies]
+libtest-mimic = "0.7.3"
+snapbox = { version = "0.5.9", features = ["path", "cmd"] }
+
 [[bin]]
 name = "rgbasm"
 path = "src/asm/main.rs"
@@ -42,6 +46,10 @@ path = "src/asm/main.rs"
 [[bin]]
 name = "rgbgfx"
 path = "src/gfx/main.rs"
+
+[[test]]
+name = "rgbgfx"
+harness = false
 
 [workspace]
 members = ["keyword-trie-gen", "warnings-gen"]
