@@ -284,76 +284,78 @@ pub(super) fn reverse(
         Ok(palmap)
     }).transpose()?;
 
-    let row_width = usize::from(width.get()) * 8;
-    let draw_image = |pixels: &mut [MaybeUninit<_>]| {
-        debug_assert_eq!(pixels.len(), row_width * height * 8);
+    // FIXME: not great to zero the whole image before overwriting all pixels, but `new` doesn't allow returning errors.
+    //        Does this cost performance?
+    let mut image = DirectImage32::new_zeroed(
+        ImageFormat::Png,
+        AlphaMode::OpaqueToTransparent,
+        1,
+        usize::from(width.get()) * 8,
+        height * 8,
+    );
+    for tile_y in 0..height {
+        for tile_x in 0..usize::from(width.get()) {
+            let index = if options.column_major {
+                tile_y + tile_x * height
+            } else {
+                tile_y * usize::from(width.get()) + tile_x
+            };
 
-        for tile_y in 0..height {
-            for tile_x in 0..usize::from(width.get()) {
-                let index = if options.column_major {
-                    tile_y + tile_x * height
-                } else {
-                    tile_y * usize::from(width.get()) + tile_x
-                };
+            // By default, a tile is unflipped, in bank 0, and uses palette #0.
+            let attribute = match &attrmap {
+                Some(attrmap) => attrmap[index],
+                None => 0x00,
+            };
+            let bank = attribute >> 3 & 1;
 
-                // By default, a tile is unflipped, in bank 0, and uses palette #0.
-                let attribute = match &attrmap {
-                    Some(attrmap) => attrmap[index],
-                    None => 0x00,
-                };
-                let bank = attribute >> 3 & 1;
-
-                // Get the tile ID at that location.
-                let tile_id = match &tilemap {
-                    Some(tilemap) => {
-                        let raw_id =
-                            tilemap[index].wrapping_sub(options.base_tile_ids[usize::from(bank)]);
-                        match options.max_nb_tiles {
-                            Some([bank0, _]) if bank != 0 => raw_id.wrapping_add(bank0 as u8),
-                            _ => raw_id,
-                        }
+            // Get the tile ID at that location.
+            let tile_id = match &tilemap {
+                Some(tilemap) => {
+                    let raw_id =
+                        tilemap[index].wrapping_sub(options.base_tile_ids[usize::from(bank)]);
+                    match options.max_nb_tiles {
+                        Some([bank0, _]) if bank != 0 => raw_id.wrapping_add(bank0 as u8),
+                        _ => raw_id,
                     }
-                    // TODO: this ignores the bank and base tile IDs, but is a warning emitted to highlight that?
-                    // TODO: this is incorrect in column_major mode!
-                    None => index as u8,
+                }
+                // TODO: this ignores the bank and base tile IDs, but is a warning emitted to highlight that?
+                // TODO: this is incorrect in column_major mode!
+                None => index as u8,
+            };
+            debug_assert!(usize::from(tile_id) < nb_tiles + options.trim);
+
+            let palette_id = match &palmap {
+                Some(palmap) => palmap[index],
+                None => attribute & 0b111,
+            };
+            let palette = &palettes[usize::from(palette_id)];
+
+            let tile_ofs = usize::from(tile_id) * tile_len;
+            let tile_data = tiles.get(tile_ofs..tile_ofs + 16).unwrap_or(&[0; 16]);
+
+            for y in 0..8 {
+                // If vertically mirrored, fetch the bytes from the other end.
+                let y_ofs =
+                    if attribute & 0x40 != 0 { 7 - y } else { y } * usize::from(options.bit_depth);
+
+                let get_plane = |plane_id: u8| {
+                    let raw_plane = tile_data[y_ofs + usize::from(plane_id % options.bit_depth)];
+                    // Handle horizontal flip.
+                    if attribute & 0x20 != 0 {
+                        raw_plane.reverse_bits()
+                    } else {
+                        raw_plane
+                    }
                 };
-                debug_assert!(usize::from(tile_id) < nb_tiles + options.trim);
+                let mut bitplane0 = get_plane(0);
+                let mut bitplane1 = get_plane(1);
 
-                let palette_id = match &palmap {
-                    Some(palmap) => palmap[index],
-                    None => attribute & 0b111,
-                };
-                let palette = &palettes[usize::from(palette_id)];
+                for x in 0..8 {
+                    let bit0 = bitplane0 >> 7;
+                    let bit1 = bitplane1 >> 7;
+                    let color_id = bit0 | bit1 << 1;
 
-                let tile_ofs = usize::from(tile_id) * tile_len;
-                let tile_data = tiles.get(tile_ofs..tile_ofs + 16).unwrap_or(&[0; 16]);
-
-                for y in 0..8 {
-                    // If vertically mirrored, fetch the bytes from the other end.
-                    let y_ofs = if attribute & 0x40 != 0 { 7 - y } else { y }
-                        * usize::from(options.bit_depth);
-
-                    let get_plane = |plane_id: u8| {
-                        let raw_plane =
-                            tile_data[y_ofs + usize::from(plane_id % options.bit_depth)];
-                        // Handle horizontal flip.
-                        if attribute & 0x20 != 0 {
-                            raw_plane.reverse_bits()
-                        } else {
-                            raw_plane
-                        }
-                    };
-                    let mut bitplane0 = get_plane(0);
-                    let mut bitplane1 = get_plane(1);
-
-                    let row_ofs = (tile_y * 8 + y) * row_width + tile_x * 8;
-                    let pixel_row = &mut pixels[row_ofs..row_ofs + 8];
-                    for x in 0..8 {
-                        let bit0 = bitplane0 >> 7;
-                        let bit1 = bitplane1 >> 7;
-                        let color_id = bit0 | bit1 << 1;
-
-                        let pixel = palette.get(usize::from(color_id))
+                    let color = *palette.get(usize::from(color_id))
                             .ok_or_else(|| {
                                 Diagnostic::error()
                                     .with_message("Attempting to index out of bounds into a palette")
@@ -361,20 +363,16 @@ pub(super) fn reverse(
                                         format!("Palette #{palette_id} contains only {} colors, so color #{color_id} does not exist", palette.len()),
                                         pixel_coords_str(tile_x, tile_y),
                                     ])
-                            });
-                        pixel_row[x].write(todo!());
+                            })?;
+                    *image.pixel_mut(0, tile_x * 8 + x, tile_y * 8 + y) = color.into();
 
-                        // Shift the pixel out.
-                        bitplane0 <<= 1;
-                        bitplane1 <<= 1;
-                    }
+                    // Shift the pixel out.
+                    bitplane0 <<= 1;
+                    bitplane1 <<= 1;
                 }
             }
         }
-    };
-    let image =
-        // SAFETY: the closure initializes the entire image, just not per row of pixels, but by row of tiles.
-        unsafe { DirectImage16::new(ImageFormat::Png, 1, usize::from(width.get()) * 8, height * 8, draw_image) };
+    }
 
     let path = options
         .input_path

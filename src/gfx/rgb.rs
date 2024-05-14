@@ -61,6 +61,16 @@ impl From<Rgb32> for Rgba {
         }
     }
 }
+impl From<Rgba> for Rgb32 {
+    fn from(value: Rgba) -> Self {
+        Rgb32(u32::from_le_bytes([
+            value.red,
+            value.green,
+            value.blue,
+            value.alpha,
+        ]))
+    }
+}
 
 impl From<Rgb> for Rgba {
     fn from(Rgb { red, green, blue }: Rgb) -> Self {
