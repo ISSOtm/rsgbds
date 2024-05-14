@@ -1,6 +1,5 @@
 use std::{
     fs::File,
-    mem::MaybeUninit,
     num::{NonZeroU16, NonZeroUsize},
 };
 
