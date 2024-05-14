@@ -38,7 +38,7 @@ fn make_test(input_entry: DirEntry, trials: &mut Vec<Trial>) {
         let stdin_name = format!("{name} via stdin");
         let clone_input_path = input_path.clone();
         trials.push(Trial::test(name, || test_png(clone_input_path, false)));
-        trials.push(Trial::test(stdin_name, || test_png(input_path, false)));
+        trials.push(Trial::test(stdin_name, || test_png(input_path, true)));
     } else if input_ext == "bin" {
         trials.push(Trial::test(name, || randtilegen(input_path, &[])));
     } else {
