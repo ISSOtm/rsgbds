@@ -496,7 +496,7 @@ mod cli {
                     output_path: self.output,
                     use_color_curve: self.color_curve,
                     allow_mirroring: self.mirror_tiles,
-                    allow_dedup: self.unique_tiles,
+                    allow_dedup: self.unique_tiles || self.mirror_tiles,
                     column_major: self.columns,
                     bit_depth: self.depth,
                     input_slice: self.slice,
