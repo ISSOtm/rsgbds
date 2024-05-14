@@ -240,21 +240,28 @@ fn make_random_image(randomness: Vec<u8>) -> DirectImage16 {
 
     // SAFETY: the entire image is initialized, just not sequentially.
     unsafe {
-        DirectImage16::new(ImageFormat::Png, 1, width * 8, height * 8, |pixels| {
-            for tile_id in 0..width * height {
-                let tile = &tile_data[tile_id];
-                let tile_x = (tile_id % width) * 8;
-                let tile_y = (tile_id / width) * 8;
-                let palette = &palettes[usize::from(attributes[tile_id].palette)];
+        DirectImage16::new(
+            ImageFormat::Png,
+            AlphaMode::OpaqueToTransparent,
+            1,
+            width * 8,
+            height * 8,
+            |pixels| {
+                for tile_id in 0..width * height {
+                    let tile = &tile_data[tile_id];
+                    let tile_x = (tile_id % width) * 8;
+                    let tile_y = (tile_id / width) * 8;
+                    let palette = &palettes[usize::from(attributes[tile_id].palette)];
 
-                for y in 0..8 {
-                    for x in 0..8 {
-                        pixels[(tile_y + y) * width * 8 + tile_x + x]
-                            .write(Rgb16(palette[usize::from(tile[y][x])]));
+                    for y in 0..8 {
+                        for x in 0..8 {
+                            pixels[(tile_y + y) * width * 8 + tile_x + x]
+                                .write(Rgb16(palette[usize::from(tile[y][x])]));
+                        }
                     }
                 }
-            }
-        })
+            },
+        )
     }
 }
 
