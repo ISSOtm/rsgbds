@@ -229,6 +229,7 @@ fn collect_image_colors(
                     ambiguous_alpha_pos.push((x, y));
                     ambiguous_alpha.insert(rgba);
                 }
+
                 Some(Opacity::Opaque) => {
                     let cgb_color = rgba.cgb_color(options.use_color_curve);
                     let rgb = Rgb::from(rgba);
@@ -237,14 +238,15 @@ fn collect_image_colors(
                     match slot {
                         None => *slot = Some((rgb, Vec::new())),
                         Some((first, conflicting)) => {
-                            if rgb != *first
-                                && conflicting.iter().copied().all(|member| rgb != member)
-                            {
+                            // Remember and report different colors that map to the same GBC color.
+                            // Perform a linear search, because `conflicting` is usually only a couple colors at worst.
+                            if rgb != *first && conflicting.iter().all(|&member| rgb != member) {
                                 conflicting.push(rgb);
                             }
                         }
                     }
                 }
+
                 Some(Opacity::Transparent) => has_transparency = true,
             }
         }
@@ -271,7 +273,7 @@ fn collect_image_colors(
             msg
         };
         let acceptable_alpha = format!(
-            "Acceptable alpha values are between 0 and #{:02x} ({}) for transparency, or between #{:02x} ({}) and #ff (255) for opaque pixels.",
+            "Acceptable alpha values are between 0 and #{:02x} ({}) for transparency, or between #{:02x} ({}) and #FF (255) for opaque pixels.",
             Rgba::TRANSPARENCY_THRESHOLD,
             Rgba::TRANSPARENCY_THRESHOLD,
             Rgba::OPACITY_THRESHOLD,
@@ -320,7 +322,8 @@ fn collect_color_sets(
     let colors_per_palette = options.colors_per_palette(has_transparency);
 
     let mut color_sets = Vec::new();
-    let mut attrmap = Vec::with_capacity(frame.image().height() * frame.image().width());
+    let mut attrmap =
+        Vec::with_capacity((frame.image().height() / 8) * (frame.image().width() / 8));
 
     'tiles: for tile in slice.iter_tiles(frame, options.column_major) {
         attrmap.push(AttrmapEntry::default());
@@ -722,7 +725,10 @@ struct TileIter<'frame, 'img: 'frame, 'slice> {
 
 impl<'img> Tile<'_, 'img> {
     fn pixel(&self, x: u8, y: u8) -> Rgb32 {
-        self.frame.pixel(x.into(), y.into())
+        self.frame.pixel(
+            usize::from(x) + usize::from(self.x),
+            usize::from(y) + usize::from(self.y),
+        )
     }
 }
 
