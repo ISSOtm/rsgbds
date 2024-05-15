@@ -22,7 +22,9 @@ impl Palette {
     }
 
     pub fn add_color(&mut self, color: Rgb16) {
-        self.colors.push(color);
+        if self.colors.iter().all(|&already_in| already_in != color) {
+            self.colors.push(color);
+        }
     }
 
     pub fn index_of(&self, color: Rgb16, has_transparency: bool) -> Option<u8> {
