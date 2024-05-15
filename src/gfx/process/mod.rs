@@ -530,12 +530,16 @@ impl TileData {
         let mut row = 0;
         for x in 0..8 {
             row <<= 1;
+            let color = Rgba::from(tile.pixel(x, y)).cgb_color(options.use_color_curve);
             let index = palette
-                .index_of(
-                    Rgba::from(tile.pixel(x, y)).cgb_color(options.use_color_curve),
-                    has_transparency,
-                )
-                .expect("The color should be in the palette?!?");
+                .index_of(color, has_transparency)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "The color ({color:?}) should be in the palette?!?
+{palette:?}
+has_transparency = {has_transparency}"
+                    )
+                });
             if (index & 1) != 0 {
                 row |= 1;
             }
