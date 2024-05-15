@@ -10,9 +10,9 @@ use plumers::{
     prelude::{DynImage32, Rgb32},
 };
 
-use crate::{palette::Palette, process::TileMatchKind, Diagnostic, InputSlice, Options};
+use crate::{palette::Palette, Diagnostic, InputSlice, Options};
 
-use super::{AttrmapEntry, TileData};
+use super::{AttrmapEntry, TileData, TileMatchKind};
 
 pub(super) fn generate_unique_tiles(
     frame: &Frame<'_, Rgb32, DynImage32>,
