@@ -325,9 +325,8 @@ impl AssignedSets {
     }
 
     fn unique_colors(&self, color_sets: &[ColorSet]) -> HashSet<Rgb16> {
-        color_sets
-            .iter()
-            .flat_map(|set| set.iter())
+        self.iter()
+            .flat_map(|attrs| color_sets[attrs.set_idx].iter())
             .copied()
             .collect()
     }
