@@ -590,9 +590,9 @@ impl<'frame, 'img: 'frame> Iterator for TileIter<'frame, 'img, '_> {
         };
 
         let coords = if self.column_major {
-            (&mut self.dx, width, &mut self.dy, height)
-        } else {
             (&mut self.dy, height, &mut self.dx, width)
+        } else {
+            (&mut self.dx, width, &mut self.dy, height)
         };
 
         if *coords.2 == coords.3 {
