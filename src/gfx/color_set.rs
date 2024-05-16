@@ -75,10 +75,10 @@ impl PartialOrd for ColorSet {
             match our.cmp(&their) {
                 Ordering::Equal => {} // Keep searching.
                 Ordering::Less => {
-                    return check_if_contained(theirs, ours).map(|()| Ordering::Greater);
+                    return check_if_contained(theirs, ours, Ordering::Greater);
                 }
                 Ordering::Greater => {
-                    return check_if_contained(ours, theirs).map(|()| Ordering::Less);
+                    return check_if_contained(ours, theirs, Ordering::Less);
                 }
             }
         }
@@ -87,7 +87,8 @@ impl PartialOrd for ColorSet {
         fn check_if_contained<'a, It: Iterator<Item = &'a Rgb16>>(
             subset: It,
             mut superset: It,
-        ) -> Option<()> {
+            if_contained: Ordering,
+        ) -> Option<Ordering> {
             for item in subset {
                 // Look for that item in `superset`.
                 // Any entries lower than `item` can be skipped, but any entry higher than it means
@@ -103,7 +104,7 @@ impl PartialOrd for ColorSet {
                 }
             }
             // All elements in `subset` were matched!
-            Some(())
+            Some(if_contained)
         }
 
         // One of the groups is a prefix of the other.
