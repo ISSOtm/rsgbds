@@ -74,18 +74,21 @@ impl PartialOrd for ColorSet {
         for (&our, &their) in std::iter::zip(ours.by_ref(), theirs.by_ref()) {
             match our.cmp(&their) {
                 Ordering::Equal => {} // Keep searching.
+                // Note that we need to "reinject" the biggest of the two, so that it is checked again for inclusion.
                 Ordering::Less => {
-                    return check_if_contained(theirs, ours, Ordering::Greater);
+                    let match_len = other.colors.len() - theirs.len() - 1;
+                    return check_if_contained(&other.colors[match_len..], ours, Ordering::Greater);
                 }
                 Ordering::Greater => {
-                    return check_if_contained(ours, theirs, Ordering::Less);
+                    let match_len = self.colors.len() - ours.len() - 1;
+                    return check_if_contained(&self.colors[match_len..], theirs, Ordering::Less);
                 }
             }
         }
 
         // Ensures that `subset` is indeed a subset of `superset`.
         fn check_if_contained<'a, It: Iterator<Item = &'a Rgb16>>(
-            subset: It,
+            subset: &'a [Rgb16],
             mut superset: It,
             if_contained: Ordering,
         ) -> Option<Ordering> {
