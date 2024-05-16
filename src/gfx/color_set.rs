@@ -26,9 +26,9 @@ impl ColorSet {
         // Look for where the color should be inserted to keep the array sorted.
         for other in &self.colors {
             match color.cmp(other) {
-                Ordering::Less => {}             // Keep searching.
+                Ordering::Greater => {}          // Keep searching.
                 Ordering::Equal => return false, // Found it!
-                Ordering::Greater => break,      // `color` should be inserted before `other`.
+                Ordering::Less => break,         // `color` should be inserted before `other`.
             }
             i += 1;
         }
@@ -61,7 +61,7 @@ impl PartialOrd for ColorSet {
             slice
                 .windows(2)
                 .enumerate()
-                .find_map(|(i, pair)| (pair[0] < pair[1]).then_some(i))
+                .find_map(|(i, pair)| (pair[0] >= pair[1]).then_some(i))
         };
         // We are able to scan forward through the lists only because they are sorted.
         debug_assert_eq!(is_sorted_and_unique(&self.colors), None);
