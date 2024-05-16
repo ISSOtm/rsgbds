@@ -25,7 +25,7 @@ pub(crate) fn process(
     reporter: &mut Reporter,
 ) -> Result<(), Diagnostic> {
     let file = File::open(input_path).map_err(|err| {
-        Diagnostic::error().with_message(format!("Failed to open input image: {err}"))
+        crate::file_error(format!("Failed to open input image: {err}"), input_path)
     })?;
     let image = DynImage32::load(
         file,
@@ -39,7 +39,7 @@ pub(crate) fn process(
         false,
     )
     .map_err(|err| {
-        Diagnostic::error().with_message(format!("Couldn't load the input image: {err}"))
+        crate::file_error(format!("Couldn't load the input image: {err}"), input_path)
     })?;
 
     if image.nb_frames() != 1 {
