@@ -106,13 +106,17 @@ fn randtilegen(input_path: PathBuf, rgbgfx_args: &[&str]) -> Result<(), Failed> 
         )
     })?;
 
-    let with_file_args = |cmd: Command| {
-        cmd.arg("-o")
-            .arg(temp_dir_path.join("result.2bpp"))
-            .arg("-p")
-            .arg(temp_dir_path.join("result.pal"))
-            .arg("-a")
-            .arg(temp_dir_path.join("result.attrmap"))
+    const OUTPUTS: [(&str, &str); 3] = [
+        ("-o", "result.2bpp"),
+        ("-p", "result.pal"),
+        ("-a", "result.attrmap"),
+    ];
+
+    let with_file_args = |mut cmd: Command| {
+        for (flag, file_name) in &OUTPUTS {
+            cmd = cmd.arg(flag).arg(temp_dir_path.join(file_name));
+        }
+        cmd
     };
     with_file_args(Command::new(RGBGFX_PATH).args(rgbgfx_args))
         .arg(rand_img_path)
