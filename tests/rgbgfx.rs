@@ -90,6 +90,8 @@ fn test_png(input_path: PathBuf, use_stdin: bool) -> Result<(), Failed> {
  */
 
 fn randtilegen(input_path: PathBuf, rgbgfx_args: &[&str]) -> Result<(), Failed> {
+    use std::process::Command;
+
     let image = make_random_image(
         std::fs::read(&input_path)
             .map_err(|err| format!("Failed to read {}: {err}", input_path.display()))?,
@@ -112,29 +114,46 @@ fn randtilegen(input_path: PathBuf, rgbgfx_args: &[&str]) -> Result<(), Failed> 
         ("-a", "result.attrmap"),
     ];
 
-    let with_file_args = |mut cmd: Command| {
+    let run_and_verify = |specific_args: &[_], name| {
+        let mut cmd = Command::new(RGBGFX_PATH);
+        cmd.args(rgbgfx_args).args(specific_args);
         for (flag, file_name) in &OUTPUTS {
-            cmd = cmd.arg(flag).arg(temp_dir_path.join(file_name));
+            cmd.arg(flag).arg(temp_dir_path.join(file_name));
         }
-        cmd
+
+        let output = cmd
+            .output()
+            .map_err(|err| format!("Failed to run the {name} command: {err}"))?;
+        if !output.stderr.is_empty() {
+            return Err(format!(
+                "The {name} command returned error messages:\n```\n{}\n```",
+                String::from_utf8_lossy(&output.stderr)
+            ));
+        }
+        if !output.status.success() {
+            return Err(format!(
+                "The {name} command failed with status {}",
+                output.status
+            ));
+        }
+        if !output.stdout.is_empty() {
+            return Err(format!(
+                "The {name} command wrote to stdout!\n```\n{}\n```",
+                String::from_utf8_lossy(&output.stdout)
+            ));
+        }
+        Ok(())
     };
-    with_file_args(Command::new(RGBGFX_PATH).args(rgbgfx_args))
-        .arg(rand_img_path)
-        .assert()
-        .success()
-        .stdout_eq([].as_slice())
-        .stderr_eq([].as_slice());
+    run_and_verify(&[rand_img_path.as_os_str()], "conversion")?;
     let roundtripped_img_path = temp_dir_path.join("roundtripped.png");
-    with_file_args(
-        Command::new(RGBGFX_PATH)
-            .args(["-r", &(image.width() / 8).to_string()])
-            .args(rgbgfx_args),
-    )
-    .arg(&roundtripped_img_path)
-    .assert()
-    .success()
-    .stdout_eq([].as_slice())
-    .stderr_eq([].as_slice());
+    run_and_verify(
+        &[
+            "-r".as_ref(),
+            (image.width() / 8).to_string().as_ref(),
+            roundtripped_img_path.as_os_str(),
+        ],
+        "reverse",
+    )?;
 
     let roundtripped = DirectImage16::load(
         roundtripped_img_path.as_path(),
