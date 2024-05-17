@@ -30,13 +30,12 @@ impl Palette {
     pub fn index_of(&self, color: Rgb16, has_transparency: bool) -> Option<u8> {
         if color == Rgba::TRANSPARENT {
             debug_assert!(has_transparency);
-            Some(0)
-        } else {
-            self.colors
-                .iter()
-                .position(|&candidate| candidate == color)
-                .map(|idx| idx as u8 + if has_transparency { 1 } else { 0 })
+            debug_assert_eq!(self.colors[0], Rgba::TRANSPARENT);
         }
+        self.colors
+            .iter()
+            .position(|&candidate| candidate == color)
+            .map(|idx| idx as u8)
     }
 }
 

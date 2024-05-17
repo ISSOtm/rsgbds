@@ -30,6 +30,7 @@ impl TileData {
 has_transparency = {has_transparency}"
                     )
                 });
+            debug_assert!(index <= 3, "{index}");
             if (index & 1) != 0 {
                 row |= 1;
             }
