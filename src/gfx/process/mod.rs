@@ -129,6 +129,18 @@ pub(crate) fn process(
             )]));
     }
 
+    // If there are more than 8 palettes, and attrmap is requested but not palmap, then warn.
+    if palettes.len() > 8 && options.attrmap_path.is_some() && options.palmap_path.is_none() {
+        reporter.report(
+            &Diagnostic::warning()
+            .with_message("More than 8 palettes were generated, but this cannot be reflected in the attribute map")
+            .with_notes(vec![
+                format!("{} palettes were generated", palettes.len()),
+                "You can generate a palette map to get palette IDs up to 256".into(),
+            ])
+        );
+    }
+
     if let Some(path) = &options.palettes_path {
         output_palettes(&palettes, path, options)?;
     }
