@@ -35,7 +35,7 @@ pub(crate) fn process(
             sort_existing: false,
             reduce_palette: false,
         },
-        AlphaMode::TransparentToOpaque,
+        AlphaMode::ZeroIsTransparent,
         false,
     )
     .map_err(|err| {

@@ -163,7 +163,7 @@ fn randtilegen(input_path: PathBuf, rgbgfx_args: &[&str]) -> Result<(), Failed> 
             sort_existing: false,
             reduce_palette: false,
         },
-        AlphaMode::TransparentToOpaque,
+        AlphaMode::ZeroIsTransparent,
     )
     .map_err(|err| {
         format!(
@@ -265,7 +265,7 @@ fn make_random_image(randomness: Vec<u8>) -> DirectImage16 {
     unsafe {
         DirectImage16::new(
             ImageFormat::Png,
-            AlphaMode::OpaqueToTransparent,
+            AlphaMode::ZeroIsOpaque,
             1,
             width * 8,
             height * 8,

@@ -287,7 +287,7 @@ pub(super) fn reverse(
     //        Does this cost performance?
     let mut image = DirectImage32::new_zeroed(
         ImageFormat::Png,
-        AlphaMode::OpaqueToTransparent,
+        AlphaMode::ZeroIsOpaque,
         1,
         usize::from(width.get()) * 8,
         height * 8,
