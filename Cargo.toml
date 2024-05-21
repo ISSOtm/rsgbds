@@ -10,30 +10,59 @@ license = "MPL-2.0"
 keywords = ["rgbds", "gameboy", "asm", "assembly", "gamedev"]
 categories = ["command-line-utilities", "development-tools::debugging", "game-development"]
 
+[features]
+# People will primarily want to `cargo install` this crate.
+default = ["rgbasm", "rgblink", "rgbfix", "rgbgfx"]
+
+rgbasm = [
+	# CLI.
+	"dep:argfile", "dep:clap", "dep:concolor", "dep:concolor-clap", "dep:wild",
+	# Specific deps.
+	"dep:keyword-trie-gen", "dep:lalrpop", "dep:lalrpop-util", "dep:memmap2", "dep:string-interner", "dep:take_mut", "dep:warnings-gen",
+]
+rgblink = [
+	# CLI.
+	"dep:argfile", "dep:clap", "dep:concolor", "dep:concolor-clap", "dep:wild",
+]
+rgbfix = [
+	# CLI.
+	"dep:argfile", "dep:clap", "dep:concolor", "dep:concolor-clap", "dep:wild",
+]
+rgbgfx = [
+	# CLI.
+	"dep:argfile", "dep:clap", "dep:concolor", "dep:concolor-clap", "dep:wild",
+	# Specific deps.
+	"dep:arrayvec", "dep:bitvec", "dep:codespan-reporting", "dep:funty", "dep:plumers",
+]
+
 # TODO: move bin-only deps to separate features.
 [dependencies] # TODO: audit deps & features
-argfile = "0.1.0"
-arrayvec = "0.7.4"
-bitvec = "1.0.1"
-clap = { version = "4.4", features = ["derive", "wrap_help"] }
-codespan-reporting = "0.11.1"
-concolor = "0.1.1"
-concolor-clap = "0.1.0"
-funty = "2.0.0"
-keyword-trie-gen = { path = "keyword-trie-gen" }
-lalrpop-util = "0.19.8"
-memmap2 = "0.5.8"
+# TODO: use `thiserror` instead
 parse-display = { version = "0.6.0", default-features = false }
-plumers = { path = "../plumers/plumers" }
-# TODO: maybe use feature `inline-more`
-string-interner = { version = "0.14.0", default-features = false, features = ["std","backends"] }
-take_mut = "0.2.2"
 try-from-discrim = "1.0.0"
-warnings-gen = { path = "warnings-gen" }
-wild = "2.2.1"
+
+# The binaries' deps.
+
+argfile = { version = "0.1.0", optional = true }
+arrayvec = { version = "0.7.4", optional = true }
+bitvec = { version = "1.0.1", optional = true }
+clap = { version = "4.4", features = ["derive", "wrap_help"], optional = true }
+codespan-reporting = { version = "0.11.1", optional = true }
+concolor = { version = "0.1.1", optional = true }
+concolor-clap = { version = "0.1.0", optional = true }
+funty = { version = "2.0.0", optional = true }
+keyword-trie-gen = { path = "keyword-trie-gen", optional = true }
+lalrpop-util = { version = "0.19.8", optional = true }
+memmap2 = { version = "0.5.8", optional = true }
+plumers = { path = "../plumers/plumers", optional = true }
+# TODO: maybe use feature `inline-more`
+string-interner = { version = "0.14.0", default-features = false, features = ["std","backends"], optional = true }
+take_mut = { version = "0.2.2", optional = true }
+warnings-gen = { path = "warnings-gen", optional = true }
+wild = { version = "2.2.1", optional = true }
 
 [build-dependencies]
-lalrpop = { version = "0.19.8", default-features = false }
+lalrpop = { version = "0.19.8", default-features = false, optional = true }
 
 [dev-dependencies]
 libtest-mimic = "0.7.3"
@@ -42,14 +71,17 @@ snapbox = { version = "0.5.9", features = ["path", "cmd"] }
 [[bin]]
 name = "rgbasm"
 path = "src/asm/main.rs"
+required-features = ["rgbasm"]
 
 [[bin]]
 name = "rgbgfx"
 path = "src/gfx/main.rs"
+required-features = ["rgbgfx"]
 
 [[test]]
 name = "rgbgfx"
 harness = false
+required-features = ["rgbgfx"]
 
 [workspace]
 members = ["keyword-trie-gen", "warnings-gen"]
