@@ -1,4 +1,4 @@
-struct Dummy;
+pub struct Dummy;
 
 impl codespan_reporting::files::Files<'static> for Dummy {
     type FileId = ();

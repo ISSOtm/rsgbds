@@ -31,12 +31,13 @@ impl Reporter {
     }
 
     pub fn report(&mut self, diagnostic: &Diagnostic) {
-        if let Err(err) =
-            codespan_reporting::term::emit(&mut self.writer, &self.config, &Dummy, diagnostic)
-        {
+        if let Err(err) = codespan_reporting::term::emit(
+            &mut self.writer,
+            &self.config,
+            &rgbds::common::codespan_dummy::Dummy,
+            diagnostic,
+        ) {
             eprintln!("Internal error when writing diagnostic: {err}");
         }
     }
 }
-
-include!("../common/codespan_dummy.rs");

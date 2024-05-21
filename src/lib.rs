@@ -4,6 +4,13 @@ use std::num::IntErrorKind;
 
 use parse_display::Display;
 
+#[cfg(any(
+    feature = "rgbasm",
+    feature = "rgblink",
+    feature = "rgbfix",
+    feature = "rgbgfx"
+))]
+pub mod common;
 pub mod object;
 pub mod rpn;
 pub mod section;
