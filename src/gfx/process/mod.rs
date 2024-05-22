@@ -117,6 +117,10 @@ pub(crate) fn process(
         None => generate_palettes(&color_sets, options, has_transparency),
     };
 
+    if let Some(path) = &options.palettes_path {
+        output_palettes(&palettes, path, options)?;
+    }
+
     // A lot of later operations depend on correct palette generation, so if the latter went wrong,
     // then they are likely to produce nonsensical results. So bail right now.
     if palettes.len() > options.nb_palettes.into() {
@@ -130,6 +134,7 @@ pub(crate) fn process(
     }
 
     // If there are more than 8 palettes, and attrmap is requested but not palmap, then warn.
+    // Do not do this if there are too many palettes only because the limit was exceeded, though.
     if palettes.len() > 8 && options.attrmap_path.is_some() && options.palmap_path.is_none() {
         reporter.report(
             &Diagnostic::warning()
@@ -139,10 +144,6 @@ pub(crate) fn process(
                 "You can generate a palette map to get palette IDs up to 256".into(),
             ])
         );
-    }
-
-    if let Some(path) = &options.palettes_path {
-        output_palettes(&palettes, path, options)?;
     }
 
     if options.allow_dedup {
@@ -219,7 +220,19 @@ pub(crate) fn process_palettes_only(
 ) -> Result<(), Diagnostic> {
     let (_, palettes) = make_palettes_as_specified(pal_specs, &[], false)?;
 
-    output_palettes(&palettes, path, options)
+    output_palettes(&palettes, path, options)?;
+
+    if palettes.len() > options.nb_palettes.into() {
+        return Err(Diagnostic::error()
+            .with_message("Generated more palettes than the maximum")
+            .with_notes(vec![format!(
+                "Generated {} palettes, over the limit of {}",
+                palettes.len(),
+                options.nb_palettes
+            )]));
+    }
+
+    Ok(())
 }
 
 /// Iterate through the image's pixels to check if any are transparent, and to build a table of
