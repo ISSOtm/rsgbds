@@ -7,7 +7,7 @@ use std::{
     path::Path,
 };
 
-const WHITESPACE_CHARS: [char; 2] = [' ', '\t'];
+use crate::WHITESPACE_CHARS;
 
 pub fn collect_expanded_args() -> Vec<OsString> {
     let args = std::env::args_os();

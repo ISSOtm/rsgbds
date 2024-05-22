@@ -1,6 +1,6 @@
 use std::{
     fs::File,
-    io::{BufRead, BufReader, BufWriter, Read, StdinLock, StdoutLock, Write},
+    io::{BufRead, BufReader, Read, StdinLock, Write},
     path::Path,
 };
 
@@ -33,9 +33,9 @@ impl Input<'_> {
 impl Output {
     pub fn new<P: AsRef<Path>>(path: P) -> std::io::Result<Self> {
         Ok(if path.as_ref() == Path::new("-") {
-            Self::Stdout(std::io::stdout().lock())
+            Self::Stdout
         } else {
-            Self::File(BufWriter::new(File::create(path)?))
+            Self::File(File::create(path)?)
         })
     }
 }

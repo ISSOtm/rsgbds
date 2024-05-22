@@ -15,6 +15,9 @@ pub mod object;
 pub mod rpn;
 pub mod section;
 
+/// RGBDS' definition of "whitespace".
+pub const WHITESPACE_CHARS: &[char] = &[' ', '\t'];
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ExportLevel {
     Local,

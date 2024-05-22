@@ -8,6 +8,7 @@
 #![debugger_visualizer(gdb_script_file = "../../maintainer/gdb_pretty_printers.py")]
 
 use clap::Parser;
+use plumers::prelude::*;
 
 use std::{
     fmt::{Debug, Display},
@@ -48,6 +49,7 @@ mod error;
 pub use error::Diagnostic;
 use error::Reporter;
 mod pal_packing;
+mod pal_spec;
 mod palette;
 mod process;
 mod reverse;
@@ -87,7 +89,7 @@ mod cli {
     use clap::Parser;
 
     use super::*;
-    use crate::InputSlice;
+    use crate::{rgb::Rgba, InputSlice};
 
     /// The command-line interface.
     #[derive(Debug, Parser)]
@@ -415,12 +417,6 @@ mod cli {
 
     impl Cli {
         pub(super) fn finish(self) -> Result<(Options, Option<super::PalSpec>), Diagnostic> {
-            let pal_spec = self.colors.map(|pal_spec| match pal_spec {
-                PalSpec::Inline(spec) => super::PalSpec::Explicit(spec),
-                PalSpec::Embedded => super::PalSpec::Embedded,
-                PalSpec::External { fmt, path } => todo!(),
-            });
-
             let max_nb_colors_per_pal = 1 << self.depth;
             let nb_colors_per_pal = NonZeroU8::new(match self.palette_size {
                 Some(size) => {
@@ -439,6 +435,41 @@ mod cli {
             .ok_or_else(|| {
                 Diagnostic::error().with_message("Palettes cannot contain zero colors")
             })?;
+
+            let pal_spec = self
+                .colors
+                .map(|pal_spec| {
+                    Ok(match pal_spec {
+                        PalSpec::Inline(spec) => super::PalSpec::Explicit(
+                            spec.into_iter()
+                                .map(|pal| {
+                                    pal.into_iter()
+                                        .map(|opt| {
+                                            opt.map(|rgb| {
+                                                Rgba::from(rgb).cgb_color(self.color_curve)
+                                            })
+                                        })
+                                        .collect()
+                                })
+                                .collect(),
+                        ),
+                        PalSpec::Embedded => super::PalSpec::Embedded,
+                        PalSpec::External { fmt, path } => {
+                            let mut colors = pal_spec::parse_palette_file(
+                                &fmt,
+                                &path,
+                                nb_colors_per_pal,
+                                self.color_curve,
+                            )?;
+                            if colors.len() > self.nb_palettes.into() {
+                                // TODO: warn about the truncation
+                                colors.truncate(self.nb_palettes.into());
+                            }
+                            super::PalSpec::Explicit(colors)
+                        }
+                    })
+                })
+                .transpose()?;
 
             fn auto_path(
                 auto: bool,
@@ -546,7 +577,7 @@ struct Options {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum PalSpec {
     Embedded,
-    Explicit(Vec<Vec<Option<Rgb>>>),
+    Explicit(Vec<Vec<Option<Rgb16>>>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
