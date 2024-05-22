@@ -2,7 +2,7 @@ use std::{fmt::Display, fs::DirEntry, ops::Range, path::PathBuf, process::ExitCo
 
 use libtest_mimic::{Arguments, Failed, Trial};
 use plumers::{image::ImageFormat, prelude::*};
-use snapbox::{cmd::Command, data::DataFormat, path::PathFixture, Data};
+use snapbox::{cmd::Command, data::DataFormat, dir::DirRoot, Data};
 
 const RGBGFX_PATH: &str = env!("CARGO_BIN_EXE_rgbgfx");
 const TESTS_DIR: &str = "tests/rgbgfx";
@@ -69,12 +69,12 @@ fn test_png(input_path: PathBuf, use_stdin: bool) -> Result<(), Failed> {
     if err_file_path.exists() {
         assert
             .failure()
-            .stderr_matches(Data::read_from(&err_file_path, Some(DataFormat::Text)))
+            .stderr_eq_(Data::read_from(&err_file_path, Some(DataFormat::Text)))
     } else {
         assert.success()
     }
     // Additionally, rgbgfx should not output anything on stdout.
-    .stdout_eq([].as_slice());
+    .stdout_eq_([].as_slice());
 
     Ok(())
 }
@@ -97,7 +97,7 @@ fn randtilegen(input_path: PathBuf, rgbgfx_args: &[&str]) -> Result<(), Failed> 
             .map_err(|err| format!("Failed to read {}: {err}", input_path.display()))?,
     );
     let temp_dir =
-        PathFixture::mutable_temp().map_err(|err| format!("Failed to create temp dir: {err}"))?;
+        DirRoot::mutable_temp().map_err(|err| format!("Failed to create temp dir: {err}"))?;
     let temp_dir_path = temp_dir.path().expect("Cannot name temp dir!?");
     let rand_img_path = temp_dir_path.join("rand.png");
 
