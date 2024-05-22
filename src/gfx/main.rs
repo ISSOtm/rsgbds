@@ -339,10 +339,10 @@ mod cli {
         fn from_str(s: &str) -> Result<Self, Self::Err> {
             if s == "embedded" {
                 Ok(Self::Embedded)
-            } else if s.get(..1) == Some("#") {
+            } else if s.starts_with('#') {
                 let colors = s
                     .trim_matches(|c: char| c.is_ascii_whitespace())
-                    .split_terminator(&[';', ':'])
+                    .split_terminator([';', ':'])
                     .map(|pal_str| {
                         pal_str
                             .trim_matches(|c: char| c.is_ascii_whitespace())

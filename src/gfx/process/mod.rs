@@ -484,10 +484,12 @@ fn make_palettes_as_specified(
         fn format_palettes(palettes: &[Palette]) -> String {
             use std::fmt::Write;
 
-            const PREFIX: &str = "No palette contains colors ";
-            let mut pals_str = String::with_capacity(palettes.len() * (PREFIX.len() + 4 * 7 + 5));
-            let mut items = palettes.iter();
-            writeln!(pals_str, "{PREFIX} {}", items.next().unwrap()).unwrap();
+            const PREFIX: &str = "The following palettes were specified:";
+            let mut pals_str = String::with_capacity(PREFIX.len() + palettes.len() * (4 * 7 + 5));
+            pals_str.push_str(PREFIX);
+            for palette in palettes {
+                write!(pals_str, "\n{}", palette).unwrap();
+            }
             pals_str
         }
         let mut notes = Vec::with_capacity(misfits.len() + 1);
