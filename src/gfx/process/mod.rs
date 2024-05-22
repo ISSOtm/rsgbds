@@ -213,7 +213,7 @@ pub(crate) fn process(
 }
 
 pub(crate) fn process_palettes_only(
-    pal_specs: &[Vec<Rgb>],
+    pal_specs: &[Vec<Option<Rgb>>],
     path: &Path,
     options: &Options,
 ) -> Result<(), Diagnostic> {
@@ -435,7 +435,7 @@ fn generate_palettes(
 }
 
 fn make_palettes_as_specified(
-    pal_specs: &[Vec<Rgb>],
+    pal_specs: &[Vec<Option<Rgb>>],
     color_sets: &[ColorSet],
     has_transparency: bool,
 ) -> Result<(Vec<usize>, Vec<Palette>), Diagnostic> {

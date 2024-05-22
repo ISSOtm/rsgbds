@@ -227,7 +227,7 @@ mod cli {
 
     #[derive(Debug, Clone)]
     pub(super) enum PalSpec {
-        Inline(Vec<Vec<Rgb>>),
+        Inline(Vec<Vec<Option<Rgb>>>),
         Embedded,
         External { fmt: String, path: String },
     }
@@ -345,7 +345,14 @@ mod cli {
                         pal_str
                             .trim_matches(|c: char| c.is_ascii_whitespace())
                             .split_terminator(',')
-                            .map(Rgb::from_str)
+                            .map(|color| {
+                                if color == "#none" {
+                                    None
+                                } else {
+                                    Some(Rgb::from_str(color))
+                                }
+                                .transpose()
+                            })
                             .collect()
                     })
                     .collect::<Result<_, _>>()?;
@@ -539,7 +546,7 @@ struct Options {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum PalSpec {
     Embedded,
-    Explicit(Vec<Vec<Rgb>>),
+    Explicit(Vec<Vec<Option<Rgb>>>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

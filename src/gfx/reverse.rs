@@ -141,7 +141,20 @@ pub(super) fn reverse(
     } else if let Some(PalSpec::Explicit(colors)) = &pal_spec {
         colors
             .iter()
-            .map(|palette| palette.iter().map(|&rgb| rgb.into()).collect())
+            .map(|palette| {
+                palette
+                    .iter()
+                    .map(|&opt| match opt {
+                        Some(rgb) => rgb.into(),
+                        None => Rgba {
+                            red: 0,
+                            green: 0,
+                            blue: 0,
+                            alpha: 255,
+                        },
+                    })
+                    .collect()
+            })
             .collect()
     } else {
         if matches!(&pal_spec, Some(PalSpec::Embedded)) {
