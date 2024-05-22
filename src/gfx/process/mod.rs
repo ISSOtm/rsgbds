@@ -512,8 +512,11 @@ fn output_palettes(palettes: &[Palette], path: &Path, options: &Options) -> Resu
 
     for palette in palettes {
         for i in 0..usize::from(options.nb_colors_per_pal.get()) {
-            let color = palette.colors.get(i).copied().unwrap_or(Rgba::TRANSPARENT);
-            output.write_all(&color.0.to_le_bytes()).map_err(|err| {
+            let cgb_color = match palette.colors.get(i) {
+                Some(color) => color.0,
+                None => 0xFFFF,
+            };
+            output.write_all(&cgb_color.to_le_bytes()).map_err(|err| {
                 crate::output_error(format!("Failed to write palettes: {err}"), path)
             })?;
         }
