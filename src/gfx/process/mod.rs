@@ -422,11 +422,10 @@ fn generate_palettes(
     options: &Options,
     has_transparency: bool,
 ) -> (Vec<usize>, Vec<Palette>) {
-    let mappings = crate::pal_packing::pack_palettes(color_sets, options, has_transparency);
+    let (mappings, nb_palettes) =
+        crate::pal_packing::pack_palettes(color_sets, options, has_transparency);
 
-    let nb_palettes = mappings.len();
     let mut palettes = vec![Palette::new(has_transparency); nb_palettes];
-
     // Generate the actual palettes from the mappings.
     debug_assert_eq!(mappings.len(), color_sets.len());
     for (&mapping, color_set) in std::iter::zip(&mappings, color_sets) {

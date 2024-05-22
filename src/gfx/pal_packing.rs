@@ -18,7 +18,7 @@ pub(crate) fn pack_palettes(
     color_sets: &[ColorSet],
     options: &Options,
     has_transparency: bool,
-) -> Vec<usize> {
+) -> (Vec<usize>, usize) {
     // Sorting the color sets by size improves the packing algorithm's efficiency.
     let mut sorted_set_ids = Vec::from_iter(0..color_sets.len());
     sorted_set_ids.sort_unstable_by_key(|&idx| color_sets[idx].len());
@@ -142,7 +142,7 @@ pub(crate) fn pack_palettes(
         }
     }
 
-    mappings
+    (mappings, assignments.len())
 }
 
 fn decant(
