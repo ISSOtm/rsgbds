@@ -104,7 +104,7 @@ pub(crate) fn process(
                     // TODO: explicitly check that they are unused, to print a more friendly error if not
                     .take(options.colors_per_palette(has_transparency).into())
                     .copied()
-                    .map(|color| todo!())
+                    .map(|color| Some(Rgba::from(color).cgb_color(options.use_color_curve)))
                     .collect()],
                 &color_sets,
                 has_transparency,
@@ -452,9 +452,11 @@ fn make_palettes_as_specified(
     has_transparency: bool,
 ) -> Result<(Vec<usize>, Vec<Palette>), Diagnostic> {
     // Convert the palette spec to actual palettes.
-    let mut palettes = Vec::from_iter(pal_specs.iter().map(|spec| {
+    let palettes = Vec::from_iter(pal_specs.iter().map(|spec| {
         let mut palette = Palette::new(has_transparency);
-        todo!();
+        for color in spec {
+            palette.add_color(color.unwrap_or(Rgba::TRANSPARENT));
+        }
         palette
     }));
 
