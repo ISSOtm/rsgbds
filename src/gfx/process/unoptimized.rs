@@ -1,5 +1,4 @@
 use std::{
-    fs::File,
     io::Write,
     path::{Path, PathBuf},
 };
@@ -8,6 +7,7 @@ use plumers::{
     color::Rgb32,
     image::{DynImage32, Frame},
 };
+use rgbds::common::dash_stdio::Output;
 
 use crate::{palette::Palette, Diagnostic, InputSlice, Options};
 
@@ -23,8 +23,8 @@ pub(super) fn output_tile_data(
     options: &Options,
     has_transparency: bool,
 ) -> Result<(), Diagnostic> {
-    let mut output = File::create(path).map_err(|err| {
-        crate::file_error(format!("Failed to create tile data file: {err}"), path)
+    let mut output = Output::new(path).map_err(|err| {
+        crate::output_error(format!("Failed to create tile data file: {err}"), path)
     })?;
 
     let width_in_tiles = input_slice.width.get();
@@ -51,7 +51,7 @@ pub(super) fn output_tile_data(
                 output
                     .write_all(&bitplanes[..usize::from(options.bit_depth)])
                     .map_err(|err| {
-                        crate::file_error(format!("Failed to write tile data: {err}"), path)
+                        crate::output_error(format!("Failed to write tile data: {err}"), path)
                     })?;
             }
         }
@@ -68,12 +68,12 @@ pub(super) fn output_maps(
     fn auto_open_path<'path>(
         path: &'path Option<PathBuf>,
         what: &'static str,
-    ) -> Result<Option<(&'path PathBuf, File)>, Diagnostic> {
+    ) -> Result<Option<(&'path PathBuf, Output)>, Diagnostic> {
         path.as_ref()
             .map(|path| {
-                File::create(path)
+                Output::new(path)
                     .map_err(|err| {
-                        crate::file_error(format!("Failed to create {what} file: {err}"), path)
+                        crate::output_error(format!("Failed to create {what} file: {err}"), path)
                     })
                     .map(|file| (path, file))
             })
@@ -96,9 +96,9 @@ pub(super) fn output_maps(
 
         let emit = |opt: &mut Option<_>, byte, what| {
             opt.as_mut()
-                .map_or(Ok(()), |(path, output): &mut (&PathBuf, File)| {
+                .map_or(Ok(()), |(path, output): &mut (&PathBuf, Output)| {
                     output.write_all(&[byte]).map_err(|err| {
-                        crate::file_error(format!("Failed to write {what}: {err}"), path)
+                        crate::output_error(format!("Failed to write {what}: {err}"), path)
                     })
                 })
         };

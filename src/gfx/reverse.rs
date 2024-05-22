@@ -1,10 +1,8 @@
-use std::{
-    fs::File,
-    num::{NonZeroU16, NonZeroUsize},
-};
+use std::num::{NonZeroU16, NonZeroUsize};
 
 use arrayvec::ArrayVec;
 use plumers::prelude::*;
+use rgbds::common::dash_stdio::{Input, Output};
 
 use crate::{error::Reporter, rgb::Rgba, Diagnostic, Nth, Options, PalSpec};
 
@@ -47,8 +45,8 @@ pub(super) fn reverse(
     // Read the tile data.
 
     let output_path = options.output_path.as_ref().unwrap(); // Guaranteed by CLI.
-    let tiles = std::fs::read(output_path).map_err(|err| {
-        crate::file_error(format!("Failed to read tile data: {err}"), output_path)
+    let tiles = rgbds::common::dash_stdio::read(output_path).map_err(|err| {
+        crate::input_error(format!("Failed to read tile data: {err}"), output_path)
     })?;
     let tile_len = 8 * usize::from(options.bit_depth);
     let nb_tiles = tiles.len() / tile_len;
@@ -72,8 +70,9 @@ pub(super) fn reverse(
 
     let (nb_tile_instances, tilemap) = match options.tilemap_path.as_ref() {
         Some(path) => {
-            let tilemap = std::fs::read(path)
-                .map_err(|err| crate::file_error(format!("Failed to read tilemap: {err}"), path))?;
+            let tilemap = rgbds::common::dash_stdio::read(path).map_err(|err| {
+                crate::input_error(format!("Failed to read tilemap: {err}"), path)
+            })?;
             (tilemap.len(), Some(tilemap))
         }
         // Assume what the user wants is basically a tile sheet/atlas.
@@ -96,8 +95,8 @@ pub(super) fn reverse(
     // TODO: `-U` to configure tile size beyond 8x8 px ("deduplication units")
 
     let palettes = if let Some(path) = options.palettes_path.as_ref() {
-        let mut file = File::open(path).map_err(|err| {
-            crate::file_error(format!("Failed to open palettes file: {err}"), path)
+        let mut file = Input::new(path).map_err(|err| {
+            crate::input_error(format!("Failed to open palettes file: {err}"), path)
         })?;
         let mut palettes = Vec::new(); // A `stat` call is probably slower than a couple of reallocs.
 
@@ -106,7 +105,7 @@ pub(super) fn reverse(
             &mut buf[..2 * usize::from(options.nb_colors_per_pal.get())],
             &mut file,
         )
-        .map_err(|err| crate::file_error(format!("Error reading palette data: {err}"), path))?
+        .map_err(|err| crate::input_error(format!("Error reading palette data: {err}"), path))?
         {
             let mut palette = ArrayVec::new();
             for i in 0..usize::from(options.nb_colors_per_pal.get()) {
@@ -165,8 +164,8 @@ pub(super) fn reverse(
     };
 
     let attrmap = options.attrmap_path.as_ref().map(|path| {
-        let attrmap = std::fs::read(path).map_err(|err| {
-            crate::file_error(format!("Failed to open attribute map file: {err}"), path)
+        let attrmap = rgbds::common::dash_stdio::read(path).map_err(|err| {
+            crate::input_error(format!("Failed to open attribute map file: {err}"), path)
         })?;
 
         if attrmap.len() != nb_tile_instances.get() {
@@ -268,7 +267,7 @@ pub(super) fn reverse(
     }
 
     let palmap = options.palmap_path.as_ref().map(|path| {
-        let palmap = std::fs::read(path).map_err(|err| crate::file_error(format!("Failed to read palette map: {err}"), path))?;
+        let palmap = rgbds::common::dash_stdio::read(path).map_err(|err| crate::input_error(format!("Failed to read palette map: {err}"), path))?;
 
         if palmap.len() != nb_tile_instances.get() {
             return Err(
@@ -377,11 +376,11 @@ pub(super) fn reverse(
         .input_path
         .as_ref()
         .expect("Can't reverse to no file!");
-    let output = File::create(path)
-        .map_err(|err| crate::file_error(format!("Failed to create image file: {err}"), path))?;
+    let output = Output::new(path)
+        .map_err(|err| crate::output_error(format!("Failed to create image file: {err}"), path))?;
     image
-        .store(output)
-        .map_err(|err| crate::file_error(format!("Failed to write image file: {err}"), path))?;
+        .store(plumers::image::Output(output))
+        .map_err(|err| crate::output_error(format!("Failed to write image file: {err}"), path))?;
 
     Ok(())
 }

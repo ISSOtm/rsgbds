@@ -1,9 +1,9 @@
 use std::{
-    cmp::Ordering, collections::HashSet, fmt::Display, fs::File, io::Write, num::NonZeroU16,
-    path::Path,
+    cmp::Ordering, collections::HashSet, fmt::Display, io::Write, num::NonZeroU16, path::Path,
 };
 
 use plumers::{image::Frame, prelude::*};
+use rgbds::common::dash_stdio::{Input, Output};
 
 use crate::{
     color_set::ColorSet,
@@ -24,11 +24,11 @@ pub(crate) fn process(
     pal_spec: Option<PalSpec>,
     reporter: &mut Reporter,
 ) -> Result<(), Diagnostic> {
-    let file = File::open(input_path).map_err(|err| {
-        crate::file_error(format!("Failed to open input image: {err}"), input_path)
+    let file = Input::new(input_path).map_err(|err| {
+        crate::input_error(format!("Failed to open input image: {err}"), input_path)
     })?;
     let image = DynImage32::load(
-        file,
+        plumers::image::Input(file),
         LoadFlags {
             remove_alpha: false,
             palette_sort: Default::default(),
@@ -39,7 +39,7 @@ pub(crate) fn process(
         false,
     )
     .map_err(|err| {
-        crate::file_error(format!("Couldn't load the input image: {err}"), input_path)
+        crate::input_error(format!("Couldn't load the input image: {err}"), input_path)
     })?;
 
     if image.nb_frames() != 1 {
@@ -490,14 +490,15 @@ fn make_palettes_as_specified(
 }
 
 fn output_palettes(palettes: &[Palette], path: &Path, options: &Options) -> Result<(), Diagnostic> {
-    let mut output = File::create(path)
-        .map_err(|err| crate::file_error(format!("Failed to create palette file: {err}"), path))?;
+    let mut output = Output::new(path).map_err(|err| {
+        crate::output_error(format!("Failed to create palette file: {err}"), path)
+    })?;
 
     for palette in palettes {
         for i in 0..usize::from(options.nb_colors_per_pal.get()) {
             let color = palette.colors.get(i).copied().unwrap_or(Rgba::TRANSPARENT);
             output.write_all(&color.0.to_le_bytes()).map_err(|err| {
-                crate::file_error(format!("Failed to write palettes: {err}"), path)
+                crate::output_error(format!("Failed to write palettes: {err}"), path)
             })?;
         }
     }

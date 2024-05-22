@@ -5,3 +5,4 @@
 
 pub mod argfile;
 pub mod codespan_dummy;
+pub mod dash_stdio;

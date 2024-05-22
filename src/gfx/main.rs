@@ -564,10 +564,26 @@ impl Options {
 
 // Little convenience utilities.
 
-fn file_error<S: Into<String>, P: AsRef<Path>>(err_msg: S, path: P) -> Diagnostic {
+fn input_error<S: Into<String>, P: AsRef<Path>>(err_msg: S, path: P) -> Diagnostic {
+    let path = path.as_ref();
     Diagnostic::error()
         .with_message(err_msg)
-        .with_notes(vec![format!("File path: {}", path.as_ref().display())])
+        .with_notes(vec![if path == Path::new("-") {
+            "Reading from standard input".into()
+        } else {
+            format!("File path: {}", path.display())
+        }])
+}
+
+fn output_error<S: Into<String>, P: AsRef<Path>>(err_msg: S, path: P) -> Diagnostic {
+    let path = path.as_ref();
+    Diagnostic::error()
+        .with_message(err_msg)
+        .with_notes(vec![if path == Path::new("-") {
+            "Writing to standard output".into()
+        } else {
+            format!("File path: {}", path.display())
+        }])
 }
 
 fn try_reading<R: Read>(mut buf: &mut [u8], mut from: R) -> std::io::Result<Option<()>> {
