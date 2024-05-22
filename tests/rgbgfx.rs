@@ -2,7 +2,7 @@ use std::{fmt::Display, fs::DirEntry, ops::Range, path::PathBuf, process::ExitCo
 
 use libtest_mimic::{Arguments, Failed, Trial};
 use plumers::{image::ImageFormat, prelude::*};
-use snapbox::{cmd::Command, data::DataFormat, dir::DirRoot, Data};
+use snapbox::{cmd::Command, data::DataFormat, dir::DirRoot, Assert, Data, Redactions};
 
 const RGBGFX_PATH: &str = env!("CARGO_BIN_EXE_rgbgfx");
 const TESTS_DIR: &str = "tests/rgbgfx";
@@ -56,22 +56,35 @@ fn test_png(input_path: PathBuf, use_stdin: bool) -> Result<(), Failed> {
         cmd = cmd.arg(format!("@{}", flags_file_path.display()));
     }
 
-    let assert = if use_stdin {
+    let mut redactions = Redactions::new();
+    redactions
+        .insert(
+            "[INPATH]",
+            if use_stdin {
+                "Reading from standard input".into()
+            } else {
+                format!("File path: {}", input_path.display())
+            },
+        )
+        .unwrap();
+
+    let result = if use_stdin {
         cmd.arg("-")
             .stdin(Data::read_from(&input_path, Some(DataFormat::Binary)))
     } else {
         cmd.arg(&input_path).stdin([].as_slice())
     }
-    .assert();
+    .assert()
+    .with_assert(Assert::new().substitutions(redactions));
 
     // Note that these checks panic instead of returning `Err()`. Ah well.
     let err_file_path = input_path.with_extension("err");
     if err_file_path.exists() {
-        assert
+        result
             .failure()
             .stderr_eq_(Data::read_from(&err_file_path, Some(DataFormat::Text)))
     } else {
-        assert.success()
+        result.success()
     }
     // Additionally, rgbgfx should not output anything on stdout.
     .stdout_eq_([].as_slice());

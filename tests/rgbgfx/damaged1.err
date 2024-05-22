@@ -1,2 +1,3 @@
-FATAL: Error reading input image ("damaged1.png"): IDAT: invalid code -- missing end-of-block
-Conversion aborted after 1 error
+error: Couldn't load the input image: invalid image data or unknown format
+ = [INPATH]
+
