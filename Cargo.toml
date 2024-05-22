@@ -16,23 +16,23 @@ default = ["rgbasm", "rgblink", "rgbfix", "rgbgfx"]
 
 rgbasm = [
 	# CLI.
-	"dep:argfile", "dep:clap", "dep:concolor", "dep:concolor-clap", "dep:wild",
+	"dep:clap", "dep:concolor", "dep:concolor-clap",
 	# Specific deps.
 	"dep:keyword-trie-gen", "dep:lalrpop", "dep:lalrpop-util", "dep:memmap2", "dep:string-interner", "dep:take_mut", "dep:warnings-gen",
 ]
 rgblink = [
 	# CLI.
-	"dep:argfile", "dep:clap", "dep:concolor", "dep:concolor-clap", "dep:wild",
+	"dep:clap", "dep:concolor", "dep:concolor-clap",
 ]
 rgbfix = [
 	# CLI.
-	"dep:argfile", "dep:clap", "dep:concolor", "dep:concolor-clap", "dep:wild",
+	"dep:clap", "dep:concolor", "dep:concolor-clap",
 ]
 rgbgfx = [
 	# CLI.
-	"dep:argfile", "dep:clap", "dep:concolor", "dep:concolor-clap", "dep:wild",
+	"dep:clap", "dep:concolor", "dep:concolor-clap",
 	# Specific deps.
-	"dep:arrayvec", "dep:bitvec", "dep:codespan-reporting", "dep:funty", "dep:plumers",
+	"dep:arrayvec", "dep:bitvec", "dep:cfg-if", "dep:codespan-reporting", "dep:funty", "dep:plumers",
 ]
 
 # TODO: move bin-only deps to separate features.
@@ -43,9 +43,9 @@ try-from-discrim = "1.0.0"
 
 # The binaries' deps.
 
-argfile = { version = "0.1.0", optional = true }
 arrayvec = { version = "0.7.4", optional = true }
 bitvec = { version = "1.0.1", optional = true }
+cfg-if = { version = "1.0.0", optional = true }
 clap = { version = "4.4", features = ["derive", "wrap_help"], optional = true }
 codespan-reporting = { version = "0.11.1", optional = true }
 concolor = { version = "0.1.1", optional = true }
@@ -59,7 +59,6 @@ plumers = { path = "../plumers/plumers", optional = true }
 string-interner = { version = "0.14.0", default-features = false, features = ["std","backends"], optional = true }
 take_mut = { version = "0.2.2", optional = true }
 warnings-gen = { path = "warnings-gen", optional = true }
-wild = { version = "2.2.1", optional = true }
 
 [build-dependencies]
 lalrpop = { version = "0.19.8", default-features = false, optional = true }

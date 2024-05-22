@@ -1,4 +1,3 @@
-error: Unexpected character, expected ',', ';', or end of argument
-In inline palette spec: #000,#none#fff
-                                  ^
-Conversion aborted after 1 error
+error: invalid value '#000,#none#fff' for '--colors <COLORS>': in an inline palette spec, colors must be in `#rgb` or `#rrggbb` format
+
+For more information, try '--help'.

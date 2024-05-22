@@ -18,9 +18,7 @@ use std::{
 };
 
 fn main() -> ExitCode {
-    // TODO: not convinced that `argfile` handles at-files the way we document...
-    let args = argfile::expand_args_from(wild::args_os(), argfile::parse_fromfile, argfile::PREFIX)
-        .expect("Failed to expand command-line args");
+    let args = rgbds::common::argfile::collect_expanded_args();
     let cli = Cli::parse_from(args);
     let mut reporter = Reporter::new(if concolor::get(concolor::Stream::Stderr).color() {
         codespan_reporting::term::termcolor::ColorChoice::Always
