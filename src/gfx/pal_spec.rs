@@ -110,10 +110,25 @@ pub fn parse_psp_file(
     })?;
     match nb_colors % u16::from(nb_colors_per_pal.get()) {
         0 => {} // OK!
-        leftover => {
-            todo!() // Warn about it. (TODO: do the same elsewhere this division is performed...)
-        }
+        leftover => crate::build_warning()
+            .with_message(format!(
+                "PSP file contains {nb_colors}, not a multiple of {nb_colors_per_pal}"
+            ))
+            .with_note(format!("The last {leftover} colors will be ignored"))
+            .finish()
+            .eprint_(),
     }
+    match nb_colors % u16::from(nb_colors_per_pal.get()) {
+        0 => {} // OK!
+        leftover => crate::build_warning()
+            .with_message(format!(
+                "PSP file contains {nb_colors}, not a multiple of {nb_colors_per_pal}"
+            ))
+            .with_note(format!("The last {leftover} colors will be ignored"))
+            .finish()
+            .eprint_(),
+    }
+
     let nb_palettes = nb_colors / u16::from(nb_colors_per_pal.get());
 
     let mut palettes = Vec::with_capacity(nb_palettes.into());
@@ -195,6 +210,15 @@ pub fn parse_gpl_file(
         // Remove the last palette, in case it turns out to be empty.
         if palette.is_empty() {
             palettes.pop();
+        } else if palette.len() != usize::from(nb_colors_per_pal.get()) {
+            crate::build_warning()
+                .with_message(format!(
+                    "The last {} colors in the GPL file will be ignored",
+                    palette.len()
+                ))
+                .finish()
+                .eprint_();
+            palettes.pop();
         }
         break;
     }
@@ -248,6 +272,15 @@ pub fn parse_hex_file(
         // Remove the last palette, in case it turns out to be empty.
         if palette.is_empty() {
             palettes.pop();
+        } else if palette.len() != usize::from(nb_colors_per_pal.get()) {
+            crate::build_warning()
+                .with_message(format!(
+                    "The last {} colors in the HEX file will be ignored",
+                    palette.len()
+                ))
+                .finish()
+                .eprint_();
+            palettes.pop();
         }
         break;
     }
@@ -283,6 +316,17 @@ pub fn parse_act_file(
             return Err(());
         }
     };
+
+    match nb_colors % u16::from(nb_colors_per_pal.get()) {
+        0 => {} // OK!
+        leftover => crate::build_warning()
+            .with_message(format!(
+                "ACT file contains {nb_colors}, not a multiple of {nb_colors_per_pal}"
+            ))
+            .with_note(format!("The last {leftover} colors will be ignored"))
+            .finish()
+            .eprint_(),
+    }
 
     Ok((0..(nb_colors / u16::from(nb_colors_per_pal.get())))
         .map(|pal_id| {
@@ -333,6 +377,17 @@ pub fn parse_aco_file(
     }
 
     let nb_colors = u16::from_be_bytes([buf[2], buf[3]]);
+    match nb_colors % u16::from(nb_colors_per_pal.get()) {
+        0 => {} // OK!
+        leftover => crate::build_warning()
+            .with_message(format!(
+                "ACO file contains {nb_colors}, not a multiple of {nb_colors_per_pal}"
+            ))
+            .with_note(format!("The last {leftover} colors will be ignored"))
+            .finish()
+            .eprint_(),
+    }
+
     (0..(nb_colors / u16::from(nb_colors_per_pal.get())))
         .map(|_| {
             (0..nb_colors_per_pal.get())
