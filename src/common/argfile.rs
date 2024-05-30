@@ -9,6 +9,8 @@ use std::{
 
 use crate::WHITESPACE_CHARS;
 
+use super::diagnostics::{build_error, ContentlessReport};
+
 pub fn collect_expanded_args() -> Vec<OsString> {
     let args = std::env::args_os();
     let mut expanded = Vec::new();
@@ -23,7 +25,13 @@ fn process_arg(arg: OsString, expanded: &mut Vec<OsString>) {
         None => expanded.push(arg),
         Some(path) => {
             let mut file = BufReader::new(File::open(path).unwrap_or_else(|err| {
-                eprintln!("Failed to open arg-file \"{}\": {err}", path.display());
+                build_error()
+                    .with_message(format!(
+                        "Failed to open arg-file \"{}\": {err}",
+                        path.display()
+                    ))
+                    .finish()
+                    .eprint_();
                 std::process::exit(2);
             }));
 
@@ -31,7 +39,13 @@ fn process_arg(arg: OsString, expanded: &mut Vec<OsString>) {
             loop {
                 line_buf.clear();
                 let line_len = file.read_line(&mut line_buf).unwrap_or_else(|err| {
-                    eprintln!("Failed to read arg-file \"{}\": {err}", path.display());
+                    build_error()
+                        .with_message(format!(
+                            "Failed to read arg-file \"{}\": {err}",
+                            path.display()
+                        ))
+                        .finish()
+                        .eprint_();
                     std::process::exit(2);
                 });
                 if line_len == 0 {

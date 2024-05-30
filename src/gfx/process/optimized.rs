@@ -8,9 +8,9 @@ use plumers::{
     image::Frame,
     prelude::{DynImage32, Rgb32},
 };
-use rgbds::common::dash_stdio::Output;
+use rgbds::common::{dash_stdio::Output, diagnostics::ContentlessReport};
 
-use crate::{palette::Palette, Diagnostic, InputSlice, Options};
+use crate::{palette::Palette, InputSlice, Options, Report};
 
 use super::{AttrmapEntry, TileData, TileMatchKind};
 
@@ -89,30 +89,40 @@ pub(super) fn output_tile_data(
     tile_data: &[TileData],
     path: &Path,
     options: &Options,
-) -> Result<(), Diagnostic> {
+) -> Result<(), ()> {
     let mut output = Output::new(path).map_err(|err| {
-        crate::output_error(format!("Failed to create tile data file: {err}"), path)
+        Output::error(path, format!("Failed to create tile data file: {err}"))
+            .finish()
+            .eprint_()
     })?;
 
     let nb_tiles = tile_data.len().saturating_sub(options.trim);
     for tile in &tile_data[..nb_tiles] {
         output.write_all(&tile.bytes).map_err(|err| {
-            crate::output_error(format!("Failed to write tile data: {err}"), path)
+            output
+                .error_in(format!("Failed to write tile data: {err}"))
+                .finish()
+                .eprint_()
         })?;
     }
 
     Ok(())
 }
 
-pub(super) fn output_tilemap(attrmap: &[AttrmapEntry], path: &Path) -> Result<(), Diagnostic> {
+pub(super) fn output_tilemap(attrmap: &[AttrmapEntry], path: &Path) -> Result<(), ()> {
     let mut output = Output::new(path).map_err(|err| {
-        crate::output_error(format!("Failed to create tilemap file: {err}"), path)
+        Output::error(path, format!("Failed to create tilemap file: {err}"))
+            .finish()
+            .eprint_()
     })?;
 
     for attr in attrmap {
-        output
-            .write_all(&[attr.tile_id])
-            .map_err(|err| crate::output_error(format!("Failed to write tilemap: {err}"), path))?;
+        output.write_all(&[attr.tile_id]).map_err(|err| {
+            output
+                .error_in(format!("Failed to write tilemap: {err}"))
+                .finish()
+                .eprint_()
+        })?;
     }
 
     Ok(())
@@ -122,9 +132,11 @@ pub(super) fn output_attrmap(
     attrmap: &[AttrmapEntry],
     mappings: &[usize],
     path: &Path,
-) -> Result<(), Diagnostic> {
+) -> Result<(), ()> {
     let mut output = Output::new(path).map_err(|err| {
-        crate::output_error(format!("Failed to create attribute map file: {err}"), path)
+        Output::error(path, format!("Failed to create attribute map file: {err}"))
+            .finish()
+            .eprint_()
     })?;
 
     for attr in attrmap {
@@ -134,7 +146,10 @@ pub(super) fn output_attrmap(
                 | (attr.bank as u8) << 3
                 | attr.get_pal_id(mappings) as u8 & 7])
             .map_err(|err| {
-                crate::output_error(format!("Failed to write attribute map: {err}"), path)
+                output
+                    .error_in(format!("Failed to write attribute map: {err}"))
+                    .finish()
+                    .eprint_()
             })?;
     }
 
@@ -145,16 +160,21 @@ pub(super) fn output_palmap(
     attrmap: &[AttrmapEntry],
     mappings: &[usize],
     path: &Path,
-) -> Result<(), Diagnostic> {
+) -> Result<(), ()> {
     let mut output = Output::new(path).map_err(|err| {
-        crate::output_error(format!("Failed to create palette map file: {err}"), path)
+        Output::error(path, format!("Failed to create palette map file: {err}"))
+            .finish()
+            .eprint_()
     })?;
 
     for attr in attrmap {
         output
             .write_all(&[attr.get_pal_id(mappings) as u8])
             .map_err(|err| {
-                crate::output_error(format!("Failed to write palette map: {err}"), path)
+                output
+                    .error_in(format!("Failed to write palette map: {err}"))
+                    .finish()
+                    .eprint_()
             })?;
     }
 

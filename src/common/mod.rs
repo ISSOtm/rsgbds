@@ -4,5 +4,6 @@
 //! so none of this is covered by SemVer.
 
 pub mod argfile;
-pub mod codespan_dummy;
+pub mod cli;
 pub mod dash_stdio;
+pub mod diagnostics;

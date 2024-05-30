@@ -61,9 +61,9 @@ fn test_png(input_path: PathBuf, use_stdin: bool) -> Result<(), Failed> {
         .insert(
             "[INPATH]",
             if use_stdin {
-                "Reading from standard input".into()
+                "<standard input>".into()
             } else {
-                format!("File path: {}", input_path.display())
+                input_path.display().to_string()
             },
         )
         .unwrap();

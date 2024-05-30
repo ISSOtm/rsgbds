@@ -7,9 +7,9 @@ use plumers::{
     color::Rgb32,
     image::{DynImage32, Frame},
 };
-use rgbds::common::dash_stdio::Output;
+use rgbds::common::{dash_stdio::Output, diagnostics::ContentlessReport};
 
-use crate::{palette::Palette, Diagnostic, InputSlice, Options};
+use crate::{palette::Palette, InputSlice, Options, Report};
 
 use super::{AttrmapEntry, TileData};
 
@@ -22,9 +22,11 @@ pub(super) fn output_tile_data(
     input_slice: &InputSlice,
     options: &Options,
     has_transparency: bool,
-) -> Result<(), Diagnostic> {
+) -> Result<(), ()> {
     let mut output = Output::new(path).map_err(|err| {
-        crate::output_error(format!("Failed to create tile data file: {err}"), path)
+        Output::error(path, format!("Failed to create tile data file: {err}"))
+            .finish()
+            .eprint_()
     })?;
 
     let width_in_tiles = input_slice.width.get();
@@ -51,7 +53,10 @@ pub(super) fn output_tile_data(
                 output
                     .write_all(&bitplanes[..usize::from(options.bit_depth)])
                     .map_err(|err| {
-                        crate::output_error(format!("Failed to write tile data: {err}"), path)
+                        output
+                            .error_in(format!("Failed to write tile data: {err}"))
+                            .finish()
+                            .eprint_()
                     })?;
             }
         }
@@ -64,16 +69,18 @@ pub(super) fn output_maps(
     attrmap: &[AttrmapEntry],
     mappings: &[usize],
     options: &Options,
-) -> Result<(), Diagnostic> {
+) -> Result<(), ()> {
     fn auto_open_path<'path>(
         path: &'path Option<PathBuf>,
         what: &'static str,
-    ) -> Result<Option<(&'path PathBuf, Output)>, Diagnostic> {
+    ) -> Result<Option<(&'path PathBuf, Output<'path>)>, ()> {
         path.as_ref()
             .map(|path| {
                 Output::new(path)
                     .map_err(|err| {
-                        crate::output_error(format!("Failed to create {what} file: {err}"), path)
+                        Output::error(path, format!("Failed to create {what} file: {err}"))
+                            .finish()
+                            .eprint_()
                     })
                     .map(|file| (path, file))
             })
@@ -98,7 +105,10 @@ pub(super) fn output_maps(
             opt.as_mut()
                 .map_or(Ok(()), |(path, output): &mut (&PathBuf, Output)| {
                     output.write_all(&[byte]).map_err(|err| {
-                        crate::output_error(format!("Failed to write {what}: {err}"), path)
+                        output
+                            .error_in(format!("Failed to write {what}: {err}"))
+                            .finish()
+                            .eprint_()
                     })
                 })
         };

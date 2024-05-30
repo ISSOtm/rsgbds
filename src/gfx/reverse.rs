@@ -2,43 +2,48 @@ use std::num::{NonZeroU16, NonZeroUsize};
 
 use arrayvec::ArrayVec;
 use plumers::prelude::*;
-use rgbds::common::dash_stdio::{Input, Output};
+use rgbds::common::{
+    dash_stdio::{Input, Output},
+    diagnostics::ContentlessReport,
+};
 
-use crate::{error::Reporter, rgb::Rgba, Diagnostic, Nth, Options, PalSpec};
+use crate::{rgb::Rgba, Nth, Options, PalSpec};
 
 pub(super) fn reverse(
     width: NonZeroU16,
     options: &Options,
     pal_spec: Option<PalSpec>,
-    reporter: &mut Reporter,
-) -> Result<(), Diagnostic> {
+) -> Result<(), ()> {
     // Check for weird CLI flag combinations.
 
     if options.allow_dedup && options.tilemap_path.is_none() {
-        reporter.report(
-            &Diagnostic::warning()
-                .with_message("Tile deduplication is enabled, but no tilemap was provided?"),
-        );
+        crate::build_warning()
+            .with_message("Tile deduplication is enabled, but no tilemap was provided?")
+            .finish()
+            .eprint_();
     }
 
     if options.use_color_curve {
         // TODO
-        reporter.report(
-            &Diagnostic::warning()
-                .with_message("The color curve is not yet supported in reverse mode"),
-        );
+        crate::build_warning()
+            .with_message("The color curve is not yet supported in reverse mode")
+            .finish()
+            .eprint_();
     }
 
     if let Some(slice) = options.input_slice.as_ref() {
-        reporter.report(
-            &Diagnostic::warning()
-                .with_message("\"Sliced-off\" pixels are ignored in reverse mode"),
-        );
+        crate::build_warning()
+            .with_message("\"Sliced-off\" pixels are ignored in reverse mode")
+            .finish()
+            .eprint_();
         if slice.width != width {
-            reporter.report(&Diagnostic::warning().with_message(format!(
-                "Specified input slice width ({}) doesn't match reversing width ({})",
-                slice.width, width
-            )));
+            crate::build_warning()
+                .with_message(format!(
+                    "Specified input slice width ({}) doesn't match reversing width ({})",
+                    slice.width, width
+                ))
+                .finish()
+                .eprint_();
         }
     }
 
@@ -46,24 +51,27 @@ pub(super) fn reverse(
 
     let output_path = options.output_path.as_ref().unwrap(); // Guaranteed by CLI.
     let tiles = rgbds::common::dash_stdio::read(output_path).map_err(|err| {
-        crate::input_error(format!("Failed to read tile data: {err}"), output_path)
+        Input::error(output_path, format!("Failed to read tile data: {err}"))
+            .finish()
+            .eprint_();
     })?;
     let tile_len = 8 * usize::from(options.bit_depth);
     let nb_tiles = tiles.len() / tile_len;
     let remainder = tiles.len() % tile_len;
     if remainder != 0 {
         let nb_bytes = tiles.len() - remainder;
-        return Err(Diagnostic::error()
+        crate::build_error()
             .with_message("Tile data was not an integer amount of tiles")
-            .with_notes(vec![
-                format!(
-                    "Read {} bytes, expected {nb_tiles} ({nb_bytes} tiles) or {} ({} tiles)",
-                    tiles.len(),
-                    nb_tiles + 1,
-                    nb_bytes + tile_len,
-                ),
-                "Consider specifying a different bit depth".into(),
-            ]));
+            .with_note(format!(
+                "Read {} bytes, expected {nb_tiles} ({nb_bytes} tiles) or {} ({} tiles)",
+                tiles.len(),
+                nb_tiles + 1,
+                nb_bytes + tile_len,
+            ))
+            .with_help("Consider specifying a different bit depth")
+            .finish()
+            .eprint_();
+        return Err(());
     }
 
     // Determine the image's dimensions.
@@ -71,23 +79,36 @@ pub(super) fn reverse(
     let (nb_tile_instances, tilemap) = match options.tilemap_path.as_ref() {
         Some(path) => {
             let tilemap = rgbds::common::dash_stdio::read(path).map_err(|err| {
-                crate::input_error(format!("Failed to read tilemap: {err}"), path)
+                Input::error(path, format!("Failed to read tilemap: {err}"))
+                    .finish()
+                    .eprint_();
             })?;
             (tilemap.len(), Some(tilemap))
         }
         // Assume what the user wants is basically a tile sheet/atlas.
         None => (nb_tiles + options.trim, None),
     };
-    let nb_tile_instances = NonZeroUsize::new(nb_tile_instances)
-        .ok_or_else(|| Diagnostic::error().with_message("Cannot generate an empty image"))?;
+    let nb_tile_instances = NonZeroUsize::new(nb_tile_instances).ok_or_else(|| {
+        crate::build_error()
+            .with_message("Cannot generate an empty image")
+            .finish()
+            .eprint_();
+    })?;
     if let Some(&[bank0, bank1]) = options.max_nb_tiles.as_ref() {
         if nb_tile_instances.get() > usize::from(bank0) + usize::from(bank1) {
-            reporter.report(&Diagnostic::error().with_message(format!("Read more tiles ({nb_tile_instances}) than the limit would permit ({bank0} + {bank1})")));
+            crate::build_error()
+                .with_message(format!("Read more tiles ({nb_tile_instances}) than the limit would permit ({bank0} + {bank1})"))
+                .finish()
+                .eprint_();
+            return Err(());
         }
     }
 
     if nb_tile_instances.get() % NonZeroUsize::from(width) != 0 {
-        return Err(Diagnostic::error().with_message(format!("Total number of tiles ({nb_tile_instances}) is not a multiple of the image width ({width} tiles)")));
+        crate::build_error().with_message(format!("Total number of tiles ({nb_tile_instances}) is not a multiple of the image width ({width} tiles)"))
+            .finish()
+            .eprint_();
+        return Err(());
     }
     let height = nb_tile_instances.get() / NonZeroUsize::from(width).get();
     let coords = |i| (i % usize::from(width.get()), i / usize::from(width.get()));
@@ -96,7 +117,9 @@ pub(super) fn reverse(
 
     let palettes = if let Some(path) = options.palettes_path.as_ref() {
         let mut file = Input::new(path).map_err(|err| {
-            crate::input_error(format!("Failed to open palettes file: {err}"), path)
+            Input::error(path, format!("Failed to open palettes file: {err}"))
+                .finish()
+                .eprint_();
         })?;
         let mut palettes = Vec::new(); // A `stat` call is probably slower than a couple of reallocs.
 
@@ -105,8 +128,11 @@ pub(super) fn reverse(
             &mut buf[..2 * usize::from(options.nb_colors_per_pal.get())],
             &mut file,
         )
-        .map_err(|err| crate::input_error(format!("Error reading palette data: {err}"), path))?
-        {
+        .map_err(|err| {
+            file.error_in(format!("Error reading palette data: {err}"))
+                .finish()
+                .eprint_();
+        })? {
             let mut palette = ArrayVec::new();
             for i in 0..usize::from(options.nb_colors_per_pal.get()) {
                 let color = Rgb16(u16::from_le_bytes([buf[i * 2], buf[i * 2 + 1]]));
@@ -117,23 +143,26 @@ pub(super) fn reverse(
         }
 
         if palettes.len() > options.nb_palettes.into() {
-            reporter.report(&Diagnostic::warning().with_message(format!(
-                "Read {} palettes, exceeding the limit of {}",
-                palettes.len(),
-                options.nb_palettes
-            )));
+            crate::build_warning()
+                .with_message(format!(
+                    "Read {} palettes, exceeding the limit of {}",
+                    palettes.len(),
+                    options.nb_palettes
+                ))
+                .finish()
+                .eprint_();
         }
 
         if let Some(PalSpec::Explicit(colors)) = &pal_spec {
             if palettes.len() != colors.len()
                 || std::iter::zip(&palettes, colors).any(|(effective, specified)| todo!())
             {
-                reporter.report(
-                    &Diagnostic::warning()
-                        .with_message("Colors in the palette file do not match what's specified on the command line!")
+                crate::build_warning()
+                        .with_message("Colors in the palette file do not match what was specified on the command line!")
                         // TODO: format the colors
-                        .with_notes(vec![format!("File colors:\n"), format!("Command line colors;\n")])
-                );
+                        //.with_note(format!("File colors:\n"), format!("Command line colors;\n"))
+                        .finish()
+                        .eprint_();
             }
         }
 
@@ -158,13 +187,13 @@ pub(super) fn reverse(
             .collect()
     } else {
         if matches!(&pal_spec, Some(PalSpec::Embedded)) {
-            reporter.report(
-                &Diagnostic::warning()
-                    .with_message(
-                        "An embedded palette was requested, but no palette file was specified",
-                    )
-                    .with_notes(vec!["Ignoring the request".into()]),
-            );
+            crate::build_warning()
+                .with_message(
+                    "An embedded palette was requested, but no palette file was specified",
+                )
+                .with_note("Ignoring the request")
+                .finish()
+                .eprint_();
         }
 
         let gray = |intensity| Rgba {
@@ -178,17 +207,20 @@ pub(super) fn reverse(
 
     let attrmap = options.attrmap_path.as_ref().map(|path| {
         let attrmap = rgbds::common::dash_stdio::read(path).map_err(|err| {
-            crate::input_error(format!("Failed to open attribute map file: {err}"), path)
+            Input::error(path, format!("Failed to open attribute map file: {err}"))
+                .finish()
+                .eprint_();
         })?;
 
         if attrmap.len() != nb_tile_instances.get() {
-            return Err(
-                Diagnostic::error()
-                    .with_message("The attribute map's size doesn't match the image's")
-                    .with_notes(vec![
-                        format!("The attribute map is {} tiles long, but the image is {nb_tile_instances} instead", attrmap.len()),
-                    ])
-            );
+            crate::build_error()
+                .with_message("The attribute map's size doesn't match the image's")
+                .with_note(
+                    format!("The attribute map is {} tiles long, but the image is {nb_tile_instances} instead", attrmap.len()),
+                )
+                .finish()
+                .eprint_();
+            return Err(());
         }
 
         // Scan through the attributes for inconsistencies.
@@ -200,33 +232,37 @@ pub(super) fn reverse(
             let (x, y) = coords(i);
 
             if usize::from(attr & 0b111) >= palettes.len() {
-                reporter.report(
-                    &Diagnostic::error()
-                        .with_message(format!("The attribute at ({x}, {y}) is referencing a palette that doesn't exist"))
-                        .with_notes(vec![
-                            format!("There are only {} palettes, but palette #{} is being referenced", palettes.len(), attr & 0b111),
-                            pixel_coords_str(x, y),
-                        ]));
+                crate::build_error()
+                    .with_message(format!("The attribute at ({x}, {y}) is referencing a palette that doesn't exist"))
+                    .with_note(
+                        pixel_coords_str(x, y),
+                        ).with_help(
+                        format!("There are only {} palettes, but palette #{} is being referenced", palettes.len(), attr & 0b111),
+                    )
+                    .finish()
+                    .eprint_();
                 bad = true;
             }
 
             if attr & 0x08 != 0 && tilemap.is_none() {
-                reporter.report(
-                    &Diagnostic::warning()
-                        .with_message(format!("The attribute at ({x}, {y}) indicates VRAM bank 1, but no tilemap was provided"))
-                        .with_notes(vec![
-                            "The bank bit will be ignored".into(),
-                            pixel_coords_str(x, y),
-                        ]),
-                );
+                crate::build_warning()
+                    .with_message(format!("The attribute at ({x}, {y}) indicates VRAM bank 1, but no tilemap was provided"))
+                    .with_note(
+                        pixel_coords_str(x, y),
+                        ).with_help(
+                        "The bank bit will be ignored",
+                    )
+                    .finish()
+                    .eprint_();
             }
         }
         if bad {
-            return Err(
-                Diagnostic::error()
-                    .with_message("The attribute map is invalid")
-                    .with_notes(vec!["See previous errors".into()])
-            );
+            crate::build_error()
+                .with_message("The attribute map is invalid")
+                .with_note("See previous errors")
+                .finish()
+                .eprint_();
+            return Err(());
         }
 
         Ok(attrmap)
@@ -242,16 +278,17 @@ pub(super) fn reverse(
 
                     let pos = id.wrapping_sub(min_id);
                     if u16::from(pos) >= max_nb_tiles[bank] {
-                        reporter.report(
-                            &Diagnostic::error()
-                                .with_message(format!(
-                                    "The tile ID at ({x}, {y}) is outside of VRAM bank {bank}'s bounds"
-                                ))
-                                .with_notes(vec![
-                                    format!("Tile ID {id} would be the {} tile, but VRAM bank {bank} can only contain {}", Nth(pos.into()), max_nb_tiles[bank]),
-                                    pixel_coords_str(x, y),
-                                ]),
-                        );
+                        crate::build_error()
+                            .with_message(format!(
+                                "The tile ID at ({x}, {y}) is outside of VRAM bank {bank}'s bounds"
+                            ))
+                            .with_note(
+                                pixel_coords_str(x, y),
+                                ).with_help(
+                                format!("Tile ID {id} would be the {} tile, but VRAM bank {bank} can only contain {}", Nth(pos.into()), max_nb_tiles[bank]),
+                            )
+                            .finish()
+                            .eprint_();
                     }
                 }
             }
@@ -263,16 +300,18 @@ pub(super) fn reverse(
 
                     let pos = id.wrapping_sub(min_id);
                     if u16::from(pos) >= max_nb_tiles[0] {
-                        reporter.report(
-                            &Diagnostic::error()
-                                .with_message(format!(
-                                    "The tile ID at ({x}, {y}) is outside of VRAM bank 0's bounds"
-                                ))
-                                .with_notes(vec![
-                                    format!("Tile ID {id} would be the {} tile, but VRAM bank 0 can only contain {}", Nth(pos.into()), max_nb_tiles[0]),
-                                    pixel_coords_str(x, y),
-                                ]),
-                        );
+                        crate::build_error()
+                            .with_message(format!(
+                                "The tile ID at ({x}, {y}) is outside of VRAM bank 0's bounds"
+                            ))
+                            .with_note(pixel_coords_str(x, y))
+                            .with_help(format!(
+                                "Tile ID {id} would be the {} tile, but VRAM bank 0 can only contain {}",
+                                Nth(pos.into()),
+                                max_nb_tiles[0],
+                            ))
+                            .finish()
+                            .eprint_();
                     }
                 }
             }
@@ -280,16 +319,22 @@ pub(super) fn reverse(
     }
 
     let palmap = options.palmap_path.as_ref().map(|path| {
-        let palmap = rgbds::common::dash_stdio::read(path).map_err(|err| crate::input_error(format!("Failed to read palette map: {err}"), path))?;
+        let palmap = rgbds::common::dash_stdio::read(path).map_err(|err| {
+            Input::error(path,format!("Failed to read palette map: {err}"))
+                .finish()
+                .eprint_();
+        })?;
 
         if palmap.len() != nb_tile_instances.get() {
-            return Err(
-                Diagnostic::error()
-                    .with_message("The palette map's size doesn't match the image's")
-                    .with_notes(vec![
-                        format!("The palette map is {} tiles long, but the image is {nb_tile_instances} instead", palmap.len()),
-                    ])
-            );
+            crate::build_error()
+                .with_message("The palette map's size doesn't match the image's")
+                .with_note(format!(
+                    "The palette map is {} tiles long, but the image is {nb_tile_instances} instead",
+                    palmap.len(),
+                ))
+                .finish()
+                .eprint_();
+            return Err(());
         }
 
         Ok(palmap)
@@ -367,14 +412,18 @@ pub(super) fn reverse(
                     let color_id = bit0 | bit1 << 1;
 
                     let color = *palette.get(usize::from(color_id))
-                            .ok_or_else(|| {
-                                Diagnostic::error()
-                                    .with_message("Attempting to index out of bounds into a palette")
-                                    .with_notes(vec![
-                                        format!("Palette #{palette_id} contains only {} colors, so color #{color_id} does not exist", palette.len()),
-                                        pixel_coords_str(tile_x, tile_y),
-                                    ])
-                            })?;
+                        .ok_or_else(|| {
+                            crate::build_error()
+                                .with_message("Attempting to index out of bounds into a palette")
+                                .with_note(
+                                    pixel_coords_str(tile_x, tile_y),
+                                ).with_help(format!(
+                                    "Palette #{palette_id} contains only {} colors, so color #{color_id} does not exist",
+                                    palette.len(),
+                                ))
+                                .finish()
+                                .eprint_();
+                        })?;
                     *image.pixel_mut(0, tile_x * 8 + x, tile_y * 8 + y) = color.into();
 
                     // Shift the pixel out.
@@ -389,11 +438,19 @@ pub(super) fn reverse(
         .input_path
         .as_ref()
         .expect("Can't reverse to no file!");
-    let output = Output::new(path)
-        .map_err(|err| crate::output_error(format!("Failed to create image file: {err}"), path))?;
+    let mut output = Output::new(path).map_err(|err| {
+        Output::error(path, format!("Failed to create image file: {err}"))
+            .finish()
+            .eprint_();
+    })?;
     image
-        .store(plumers::image::Output(output))
-        .map_err(|err| crate::output_error(format!("Failed to write image file: {err}"), path))?;
+        .store(plumers::image::Output(&mut output))
+        .map_err(|err| {
+            output
+                .error_in(format!("Failed to write image file: {err}"))
+                .finish()
+                .eprint_();
+        })?;
 
     Ok(())
 }

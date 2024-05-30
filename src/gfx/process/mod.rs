@@ -3,14 +3,16 @@ use std::{
 };
 
 use plumers::{image::Frame, prelude::*};
-use rgbds::common::dash_stdio::{Input, Output};
+use rgbds::common::{
+    dash_stdio::{Input, Output},
+    diagnostics::ContentlessReport,
+};
 
 use crate::{
     color_set::ColorSet,
-    error::Reporter,
     palette::Palette,
     rgb::{Opacity, Rgb, Rgba},
-    Diagnostic, InputSlice, Options, PalSpec,
+    InputSlice, Options, PalSpec,
 };
 
 mod optimized;
@@ -22,13 +24,14 @@ pub(crate) fn process(
     input_path: &Path,
     options: &Options,
     pal_spec: Option<PalSpec>,
-    reporter: &mut Reporter,
-) -> Result<(), Diagnostic> {
-    let file = Input::new(input_path).map_err(|err| {
-        crate::input_error(format!("Failed to open input image: {err}"), input_path)
+) -> Result<(), ()> {
+    let mut file = Input::new(input_path).map_err(|err| {
+        Input::error(input_path, format!("Failed to open input image: {err}"))
+            .finish()
+            .eprint_();
     })?;
     let image = DynImage32::load(
-        plumers::image::Input(file),
+        plumers::image::Input(&mut file),
         LoadFlags {
             remove_alpha: false,
             palette_sort: Default::default(),
@@ -39,28 +42,33 @@ pub(crate) fn process(
         false,
     )
     .map_err(|err| {
-        crate::input_error(format!("Couldn't load the input image: {err}"), input_path)
+        file.error_in(format!("Couldn't load the input image: {err}"))
+            .finish()
+            .eprint_();
     })?;
 
     if image.nb_frames() != 1 {
-        reporter.report(
-            &Diagnostic::warning()
-                .with_message("The input image has multiple animation frames")
-                .with_notes(vec!["Only the first frame will be processed".into()]),
-        )
+        crate::build_warning()
+            .with_message("The input image has multiple animation frames")
+            .with_note("Only the first frame will be processed")
+            .finish()
+            .eprint_();
     }
     let frame = image.frame(0);
     let slice = match options.input_slice {
         Some(slice) => slice,
         None => {
             if image.width() % 8 != 0 || image.height() % 8 != 0 {
-                return Err(Diagnostic::error().with_message(format!(
+                crate::build_error().with_message(format!(
                     "The input image's dimensions ({}x{}) must each be a multiple of 8 pixels",
                     image.width(),
                     image.height(),
-                )).with_notes(vec![
-                    "If you want to only process a portion of it, try using the `-L` option instead".into(),
-                ]));
+                )).with_note(
+                    "If you want to only process a portion of it, try using the `-L` option instead",
+                )
+                .finish()
+                .eprint_();
+                return Err(());
             }
 
             // Panicking if the input image exceeds 524288 pixels in either dimension seems reasonable.
@@ -71,7 +79,11 @@ pub(crate) fn process(
                 dimension_in_tiles(image.width(), "Image width too large!"),
                 dimension_in_tiles(image.height(), "Image height too large!"),
             ) else {
-                return Err(Diagnostic::error().with_message("The input image cannot be empty"));
+                crate::build_error()
+                    .with_message("The input image cannot be empty")
+                    .finish()
+                    .eprint_();
+                return Err(());
             };
 
             InputSlice {
@@ -83,7 +95,7 @@ pub(crate) fn process(
         }
     };
 
-    let (image_colors, has_transparency) = collect_image_colors(&image, &slice, options, reporter)?;
+    let (image_colors, has_transparency) = collect_image_colors(&image, &slice, options)?;
 
     // This is done unconditionally because it validates the image (which we want to perform even
     // if no output is requested), and because it's necessary to generate any output (except an
@@ -93,9 +105,12 @@ pub(crate) fn process(
     let (mappings, palettes) = match pal_spec {
         Some(PalSpec::Embedded) => {
             let pal = image.palette().ok_or_else(|| {
-                Diagnostic::error().with_message(
-                    "`-c embedded` is being used, but the image lacks an embedded palette",
-                )
+                crate::build_error()
+                    .with_message(
+                        "`-c embedded` is being used, but the image lacks an embedded palette",
+                    )
+                    .finish()
+                    .eprint_();
             })?;
             make_palettes_as_specified(
                 &[pal
@@ -124,26 +139,28 @@ pub(crate) fn process(
     // A lot of later operations depend on correct palette generation, so if the latter went wrong,
     // then they are likely to produce nonsensical results. So bail right now.
     if palettes.len() > options.nb_palettes.into() {
-        return Err(Diagnostic::error()
+        crate::build_error()
             .with_message("Generated more palettes than the maximum")
-            .with_notes(vec![format!(
+            .with_note(format!(
                 "Generated {} palettes, over the limit of {}",
                 palettes.len(),
                 options.nb_palettes
-            )]));
+            ))
+            .finish()
+            .eprint_();
+        return Err(());
     }
 
     // If there are more than 8 palettes, and attrmap is requested but not palmap, then warn.
     // Do not do this if there are too many palettes only because the limit was exceeded, though.
     if palettes.len() > 8 && options.attrmap_path.is_some() && options.palmap_path.is_none() {
-        reporter.report(
-            &Diagnostic::warning()
+        crate::build_warning()
             .with_message("More than 8 palettes were generated, but this cannot be reflected in the attribute map")
-            .with_notes(vec![
-                format!("{} palettes were generated", palettes.len()),
-                "You can generate a palette map to get palette IDs up to 256".into(),
-            ])
-        );
+            .with_note(
+                format!("{} palettes were generated", palettes.len())).with_help(
+                "You can generate a palette map to get palette IDs up to 256")
+                .finish()
+                .eprint_();
     }
 
     if options.allow_dedup {
@@ -183,9 +200,12 @@ pub(crate) fn process(
             // Check the tile count.
             if nb_tiles > (bank0 + bank1).into() {
                 let nb_tiles_msg = format!("The image contains {nb_tiles} (unoptimized) tiles");
-                return Err(Diagnostic::error()
+                crate::build_error()
                     .with_message("The image contains more tiles than the limit")
-                    .with_notes(vec![nb_tiles_msg]));
+                    .with_note(nb_tiles_msg)
+                    .finish()
+                    .eprint_();
+                return Err(());
             }
         }
 
@@ -217,19 +237,22 @@ pub(crate) fn process_palettes_only(
     pal_specs: &[Vec<Option<Rgb16>>],
     path: &Path,
     options: &Options,
-) -> Result<(), Diagnostic> {
+) -> Result<(), ()> {
     let (_, palettes) = make_palettes_as_specified(pal_specs, &[], false)?;
 
     output_palettes(&palettes, path, options)?;
 
     if palettes.len() > options.nb_palettes.into() {
-        return Err(Diagnostic::error()
+        crate::build_error()
             .with_message("Generated more palettes than the maximum")
-            .with_notes(vec![format!(
+            .with_note(format!(
                 "Generated {} palettes, over the limit of {}",
                 palettes.len(),
                 options.nb_palettes
-            )]));
+            ))
+            .finish()
+            .eprint_();
+        return Err(());
     }
 
     Ok(())
@@ -241,8 +264,7 @@ fn collect_image_colors(
     image: &DynImage32,
     slice: &InputSlice,
     options: &Options,
-    reporter: &mut Reporter,
-) -> Result<(Vec<Rgb16>, bool), Diagnostic> {
+) -> Result<(Vec<Rgb16>, bool), ()> {
     let mut has_transparency = false;
     let mut cgb_colors: [_; 0x8000] = std::array::from_fn(|_i| None);
     let mut ambiguous_alpha_pos = Vec::new();
@@ -306,9 +328,13 @@ fn collect_image_colors(
             Rgba::OPACITY_THRESHOLD,
             Rgba::OPACITY_THRESHOLD,
         );
-        return Err(Diagnostic::error()
+        crate::build_error()
             .with_message("Some colors have ambiguous transparency")
-            .with_notes(vec![offending_colors, acceptable_alpha]));
+            .with_note(offending_colors)
+            .with_help(acceptable_alpha)
+            .finish()
+            .eprint_();
+        return Err(());
     }
 
     let mut image_colors = match image.palette() {
@@ -323,16 +349,13 @@ fn collect_image_colors(
         };
 
         if !conflicting.is_empty() {
-            reporter.report(
-                &Diagnostic::warning()
-                    .with_message(format!(
-                        "Several colors in the image map to GBC color ${cgb_color:04x}"
-                    ))
-                    .with_notes(vec![format!(
-                        "The colors are: {}",
-                        ColorList(first, conflicting)
-                    )]),
-            );
+            crate::build_warning()
+                .with_message(format!(
+                    "Several colors in the image map to GBC color ${cgb_color:04x}"
+                ))
+                .with_note(format!("The colors are: {}", ColorList(first, conflicting)))
+                .finish()
+                .eprint_();
         }
 
         image_colors.push(Rgb16(cgb_color as u16));
@@ -345,7 +368,7 @@ fn collect_color_sets(
     slice: &InputSlice,
     options: &Options,
     has_transparency: bool,
-) -> Result<(Vec<ColorSet>, Vec<AttrmapEntry>), Diagnostic> {
+) -> Result<(Vec<ColorSet>, Vec<AttrmapEntry>), ()> {
     let colors_per_palette = options.colors_per_palette(has_transparency);
 
     let mut color_sets = Vec::new();
@@ -380,10 +403,13 @@ fn collect_color_sets(
         }
 
         if nb_colors_in_tile > colors_per_palette {
-            return Err(Diagnostic::error().with_message(format!(
+            crate::build_error().with_message(format!(
                 "The tile at (x: {}, y: {}) has more opaque colors than the maximum ({colors_per_palette})",
                 tile.x, tile.y,
-            )));
+            ))
+            .finish()
+            .eprint_();
+            return Err(());
         }
 
         // Register the color set, avoiding overlap with existing ones.
@@ -450,7 +476,7 @@ fn make_palettes_as_specified(
     pal_specs: &[Vec<Option<Rgb16>>],
     color_sets: &[ColorSet],
     has_transparency: bool,
-) -> Result<(Vec<usize>, Vec<Palette>), Diagnostic> {
+) -> Result<(Vec<usize>, Vec<Palette>), ()> {
     // Convert the palette spec to actual palettes.
     let palettes = Vec::from_iter(pal_specs.iter().map(|spec| {
         let mut palette = Palette::new(has_transparency);
@@ -492,22 +518,25 @@ fn make_palettes_as_specified(
             }
             pals_str
         }
-        let mut notes = Vec::with_capacity(misfits.len() + 1);
-        notes.push(format_palettes(&palettes));
-        notes.extend(
-            misfits
-                .iter()
-                .map(|set| format!("No palette contains colors {set}")),
-        );
-        Err(Diagnostic::error()
+        let mut note = format_palettes(&palettes);
+        for set in misfits {
+            use std::fmt::Write;
+            write!(note, "\nNo palette contains colors {set}").unwrap()
+        }
+        crate::build_error()
             .with_message("Some tiles cannot be displayed with the specified palettes")
-            .with_notes(notes))
+            .with_note(note)
+            .finish()
+            .eprint_();
+        Err(())
     }
 }
 
-fn output_palettes(palettes: &[Palette], path: &Path, options: &Options) -> Result<(), Diagnostic> {
+fn output_palettes(palettes: &[Palette], path: &Path, options: &Options) -> Result<(), ()> {
     let mut output = Output::new(path).map_err(|err| {
-        crate::output_error(format!("Failed to create palette file: {err}"), path)
+        Output::error(path, format!("Failed to create palette file: {err}"))
+            .finish()
+            .eprint_();
     })?;
 
     for palette in palettes {
@@ -517,7 +546,10 @@ fn output_palettes(palettes: &[Palette], path: &Path, options: &Options) -> Resu
                 None => 0xFFFF,
             };
             output.write_all(&cgb_color.to_le_bytes()).map_err(|err| {
-                crate::output_error(format!("Failed to write palettes: {err}"), path)
+                output
+                    .error_in(format!("Failed to write palettes: {err}"))
+                    .finish()
+                    .eprint_();
             })?;
         }
     }

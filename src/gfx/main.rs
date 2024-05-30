@@ -11,43 +11,40 @@ use clap::Parser;
 use plumers::prelude::*;
 
 use std::{
-    fmt::{Debug, Display},
+    fmt::Display,
     io::Read,
     num::{NonZeroU16, NonZeroU8},
-    path::{Path, PathBuf},
+    path::PathBuf,
     process::ExitCode,
 };
 
+pub use rgbds::common::diagnostics::{
+    build_error, build_warning, ContentlessReport, Report, ReportBuilder,
+};
+
 fn main() -> ExitCode {
+    rgbds::common::cli::detect_default_color_choice();
+
     let args = rgbds::common::argfile::collect_expanded_args();
-    let cli = Cli::parse_from(args);
-    let mut reporter = Reporter::new(if concolor::get(concolor::Stream::Stderr).color() {
-        codespan_reporting::term::termcolor::ColorChoice::Always
-    } else {
-        codespan_reporting::term::termcolor::ColorChoice::Never
-    });
+    let cli = Cli::parse_from(args); // This also calls `rgbds::common::cli::apply_color_choice`.
     let (options, pal_spec) = match cli.finish() {
         Ok((opt, spec)) => (opt, spec),
-        Err(diag) => {
-            reporter.report(&diag);
+        Err(()) => {
             return ExitCode::FAILURE;
         }
     };
 
     // TODO: verbosity easter egg
 
-    if let Err(diag) = run(options, pal_spec, &mut reporter) {
-        reporter.report(&diag);
-        return ExitCode::FAILURE;
+    match run(options, pal_spec) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(()) => ExitCode::FAILURE,
     }
-
-    ExitCode::SUCCESS
 }
 
+mod cli;
+use cli::*;
 mod color_set;
-mod error;
-pub use error::Diagnostic;
-use error::Reporter;
 mod pal_packing;
 mod pal_spec;
 mod palette;
@@ -56,32 +53,35 @@ mod reverse;
 mod rgb;
 use rgb::Rgb;
 
-fn run(
-    options: Options,
-    pal_spec: Option<PalSpec>,
-    reporter: &mut Reporter,
-) -> Result<(), Diagnostic> {
+fn run(options: Options, pal_spec: Option<PalSpec>) -> Result<(), ()> {
     if let Some(&width) = &options.reversed_width.as_ref() {
-        reverse::reverse(width, &options, pal_spec, reporter)
+        reverse::reverse(width, &options, pal_spec)
     } else if let Some(input_path) = &options.input_path {
-        process::process(input_path, &options, pal_spec, reporter)
+        process::process(input_path, &options, pal_spec)
     } else if let Some(palettes_path) = &options.palettes_path {
         match pal_spec.expect("The CLI should enforce either an input path or a pal spec!") {
-            PalSpec::Embedded => Err(Diagnostic::error()
-                .with_message("An embedded color spec cannot be used without an input image")),
+            PalSpec::Embedded => {
+                build_error()
+                    .with_message("An embedded color spec cannot be used without an input image")
+                    .finish()
+                    .eprint_();
+                Err(())
+            }
             PalSpec::Explicit(pal_specs) => {
                 process::process_palettes_only(&pal_specs, palettes_path, &options)
             }
         }
     } else {
-        Err(Diagnostic::error().with_message(
-            "To dump the color spec to a file, please specify that file's path with `-p`",
-        ))
+        let mut builder = build_error().with_message("No operation was specified");
+        if matches!(pal_spec, Some(PalSpec::Explicit(_))) {
+            builder.set_help(
+                "To dump the color spec to a file, please specify that file's path with `-p`",
+            );
+        }
+        builder.finish().eprint_();
+        Err(())
     }
 }
-
-mod cli;
-use cli::*;
 
 #[derive(Debug, Clone)]
 struct Options {
@@ -136,28 +136,6 @@ impl Options {
 }
 
 // Little convenience utilities.
-
-fn input_error<S: Into<String>, P: AsRef<Path>>(err_msg: S, path: P) -> Diagnostic {
-    let path = path.as_ref();
-    Diagnostic::error()
-        .with_message(err_msg)
-        .with_notes(vec![if path == Path::new("-") {
-            "Reading from standard input".into()
-        } else {
-            format!("File path: {}", path.display())
-        }])
-}
-
-fn output_error<S: Into<String>, P: AsRef<Path>>(err_msg: S, path: P) -> Diagnostic {
-    let path = path.as_ref();
-    Diagnostic::error()
-        .with_message(err_msg)
-        .with_notes(vec![if path == Path::new("-") {
-            "Writing to standard output".into()
-        } else {
-            format!("File path: {}", path.display())
-        }])
-}
 
 fn try_reading<R: Read>(mut buf: &mut [u8], mut from: R) -> std::io::Result<Option<()>> {
     use std::io::ErrorKind;

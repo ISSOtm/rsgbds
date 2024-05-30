@@ -4,21 +4,26 @@ use std::{
 };
 
 use plumers::prelude::*;
-use rgbds::{common::dash_stdio::Input, WHITESPACE_CHARS};
-
-use crate::{
-    rgb::{Rgb, Rgba},
-    Diagnostic,
+use rgbds::{
+    common::{dash_stdio::Input, diagnostics::ContentlessReport},
+    WHITESPACE_CHARS,
 };
+
+use crate::rgb::{Rgb, Rgba};
 
 pub fn parse_palette_file(
     format: &str,
     path: &str,
     nb_colors_per_pal: NonZeroU8,
     use_curve: bool,
-) -> Result<Vec<Vec<Option<Rgb16>>>, Diagnostic> {
-    let file = Input::new(path).map_err(|err| {
-        crate::input_error(format!("Failed to open external palette file: {err}"), path)
+) -> Result<Vec<Vec<Option<Rgb16>>>, ()> {
+    let file = Input::new(path.as_ref()).map_err(|err| {
+        Input::error(
+            path.as_ref(),
+            format!("Failed to open external palette file: {err}"),
+        )
+        .finish()
+        .eprint_();
     })?;
 
     if format.eq_ignore_ascii_case("PSP") {
@@ -34,8 +39,12 @@ pub fn parse_palette_file(
     } else if format.eq_ignore_ascii_case("GBC") {
         parse_gbc_file(file, path, nb_colors_per_pal, use_curve)
     } else {
-        Err(Diagnostic::error()
-            .with_message(format!("Unknown external palette spec format \"{format}\"")))
+        crate::build_error()
+            .with_message(format!("Unknown external palette spec format \"{format}\""))
+            .with_help("Supported formats are PSP, GPL, HEX, ACT, ACO, and GBC")
+            .finish()
+            .eprint_();
+        Err(())
     }
 }
 
@@ -45,44 +54,60 @@ pub fn parse_psp_file(
     path: &str,
     nb_colors_per_pal: NonZeroU8,
     use_curve: bool,
-) -> Result<Vec<Vec<Option<Rgb16>>>, Diagnostic> {
-    let input_error = |err_msg| crate::input_error(err_msg, path);
-
+) -> Result<Vec<Vec<Option<Rgb16>>>, ()> {
     let mut lines = Lines::new(file);
     macro_rules! next_line {
         () => {
-            lines
-                .next_line()
-                .map_err(|err| input_error(format!("Failed to read PSP file: {err}")))
+            lines.next_line().map_err(|err| {
+                Input::error(path.as_ref(), format!("Failed to read PSP file: {err}"))
+                    .finish()
+                    .eprint_();
+            })
         };
         (require) => {
             next_line!().and_then(|opt| {
                 opt.ok_or_else(|| {
-                    input_error(format!(
-                        "Failed to read PSP file: it appears to be truncated"
-                    ))
+                    Input::error(
+                        path.as_ref(),
+                        format!("Failed to read PSP file: it appears to be truncated"),
+                    )
+                    .finish()
+                    .eprint_();
                 })
             })
         };
     }
 
     if next_line!(require)? != "JASC-PAL" {
-        return Err(input_error(
-            "Palette file does not appear to be a PSP palette file".into(),
-        ));
+        Input::error(
+            path.as_ref(),
+            "Palette file does not appear to be a PSP palette file",
+        )
+        .finish()
+        .eprint_();
+        return Err(());
     }
     match next_line!(require)? {
         "0100" => {}
         version => {
-            return Err(input_error(format!(
-                "PSP palette file version {version} is not supported"
-            )))
+            Input::error(
+                path.as_ref(),
+                format!("PSP palette file version {version} is not supported"),
+            )
+            .finish()
+            .eprint_();
+            return Err(());
         }
     }
 
-    let nb_colors: u16 = next_line!(require)?
-        .parse()
-        .map_err(|err| input_error(format!("Invalid number of colors in PSP file: {err}")))?;
+    let nb_colors: u16 = next_line!(require)?.parse().map_err(|err| {
+        Input::error(
+            path.as_ref(),
+            format!("Invalid number of colors in PSP file: {err}"),
+        )
+        .finish()
+        .eprint_();
+    })?;
     match nb_colors % u16::from(nb_colors_per_pal.get()) {
         0 => {} // OK!
         leftover => {
@@ -116,31 +141,38 @@ pub fn parse_gpl_file(
     path: &str,
     nb_colors_per_pal: NonZeroU8,
     use_curve: bool,
-) -> Result<Vec<Vec<Option<Rgb16>>>, Diagnostic> {
-    let input_error = |err_msg| crate::input_error(err_msg, path);
-
+) -> Result<Vec<Vec<Option<Rgb16>>>, ()> {
     let mut lines = Lines::new(file);
     macro_rules! next_line {
         () => {
-            lines
-                .next_line()
-                .map_err(|err| input_error(format!("Failed to read GPL file: {err}")))
+            lines.next_line().map_err(|err| {
+                Input::error(path.as_ref(), format!("Failed to read GPL file: {err}"))
+                    .finish()
+                    .eprint_();
+            })
         };
         (require) => {
             next_line!().and_then(|opt| {
                 opt.ok_or_else(|| {
-                    input_error(format!(
-                        "Failed to read GPL file: it appears to be truncated"
-                    ))
+                    Input::error(
+                        path.as_ref(),
+                        format!("Failed to read GPL file: it appears to be truncated"),
+                    )
+                    .finish()
+                    .eprint_();
                 })
             })
         };
     }
 
     if !next_line!(require)?.starts_with("GIMP Palette") {
-        return Err(input_error(
-            "Palette file does not appear to be a GPL palette file".into(),
-        ));
+        Input::error(
+            path.as_ref(),
+            "Palette file does not appear to be a GPL palette file",
+        )
+        .finish()
+        .eprint_();
+        return Err(());
     }
 
     let mut palettes = Vec::with_capacity(8);
@@ -176,19 +208,18 @@ pub fn parse_hex_file(
     path: &str,
     nb_colors_per_pal: NonZeroU8,
     use_curve: bool,
-) -> Result<Vec<Vec<Option<Rgb16>>>, Diagnostic> {
-    let input_error = |err_msg| crate::input_error(err_msg, path);
-
+) -> Result<Vec<Vec<Option<Rgb16>>>, ()> {
     let mut lines = Lines::new(file);
     let mut palettes = Vec::with_capacity(8);
     'next_pal: loop {
         palettes.push(Vec::with_capacity(nb_colors_per_pal.get().into()));
         let palette = palettes.last_mut().unwrap();
 
-        while let Some(line) = lines
-            .next_line()
-            .map_err(|err| input_error(format!("Failed to read HEX file: {err}")))?
-        {
+        while let Some(line) = lines.next_line().map_err(|err| {
+            Input::error(path.as_ref(), format!("Failed to read HEX file: {err}"))
+                .finish()
+                .eprint_();
+        })? {
             fn parse_line(line: &str) -> Option<Rgb> {
                 let mut chars = line.chars();
                 let mut digit = || Some(chars.next()?.to_digit(16)? as u8);
@@ -200,9 +231,12 @@ pub fn parse_hex_file(
                 Some(Rgb { red, green, blue })
             }
             let color = parse_line(line).ok_or_else(|| {
-                input_error(format!(
-                    "Failed to read HEX file: failed to parse color out of \"{line}\""
-                ))
+                Input::error(
+                    path.as_ref(),
+                    format!("Failed to read HEX file: failed to parse color out of \"{line}\""),
+                )
+                .finish()
+                .eprint_();
             })?;
 
             palette.push(Some(Rgba::from(color).cgb_color(use_curve)));
@@ -227,21 +261,26 @@ pub fn parse_act_file(
     path: &str,
     nb_colors_per_pal: NonZeroU8,
     use_curve: bool,
-) -> Result<Vec<Vec<Option<Rgb16>>>, Diagnostic> {
-    let input_error = |err_msg| crate::input_error(err_msg, path);
-
+) -> Result<Vec<Vec<Option<Rgb16>>>, ()> {
     let mut buf = [0; 768 + 4];
     let nb_colors = match file
         .read_exact(&mut buf[..768])
         .and_then(|()| try_fill_buf(file, &mut buf[769..]))
-        .map_err(|err| input_error(format!("Failed to read ACT file: {err}")))?
-    {
+        .map_err(|err| {
+            Input::error(path.as_ref(), format!("Failed to read ACT file: {err}"))
+                .finish()
+                .eprint_();
+        })? {
         Ok(()) => u16::from_be_bytes([buf[768], buf[769]]),
         Err(0) => 256,
         Err(len) => {
-            return Err(input_error(format!(
-                "An ACT file must be either 768 or 772 bytes, not {len}"
-            )))
+            Input::error(
+                path.as_ref(),
+                format!("An ACT file must be either 768 or 772 bytes, not {len}"),
+            )
+            .finish()
+            .eprint_();
+            return Err(());
         }
     };
 
@@ -271,17 +310,26 @@ pub fn parse_aco_file(
     path: &str,
     nb_colors_per_pal: NonZeroU8,
     use_curve: bool,
-) -> Result<Vec<Vec<Option<Rgb16>>>, Diagnostic> {
-    let input_error = |err_msg| crate::input_error(err_msg, path);
+) -> Result<Vec<Vec<Option<Rgb16>>>, ()> {
     let mut buf = [0; 10];
 
-    file.read_exact(&mut buf[..4])
-        .map_err(|err| input_error(format!("Failed to read ACO file's header: {err}")))?;
+    file.read_exact(&mut buf[..4]).map_err(|err| {
+        Input::error(
+            path.as_ref(),
+            format!("Failed to read ACO file's header: {err}"),
+        )
+        .finish()
+        .eprint_();
+    })?;
     // Assert the file version.
     if u16::from_be_bytes([buf[0], buf[1]]) != 1 {
-        return Err(input_error(
-            "Palette file does not appear to be an ACO v1 file".into(),
-        ));
+        Input::error(
+            path.as_ref(),
+            "Palette file does not appear to be an ACO v1 file",
+        )
+        .finish()
+        .eprint_();
+        return Err(());
     }
 
     let nb_colors = u16::from_be_bytes([buf[2], buf[3]]);
@@ -289,8 +337,11 @@ pub fn parse_aco_file(
         .map(|_| {
             (0..nb_colors_per_pal.get())
                 .map(|_| {
-                    file.read_exact(&mut buf)
-                        .map_err(|err| input_error(format!("Failed to read ACO file: {err}")))?;
+                    file.read_exact(&mut buf).map_err(|err| {
+                        Input::error(path.as_ref(), format!("Failed to read ACO file: {err}"))
+                            .finish()
+                            .eprint_();
+                    })?;
 
                     let color_kind = u16::from_be_bytes([buf[0], buf[1]]);
                     let color = match color_kind {
@@ -300,19 +351,36 @@ pub fn parse_aco_file(
                             green: buf[4],
                             blue: buf[6],
                         }),
-                        1 => Err(input_error(
-                            "Color type HSB is not supported in ACO files".into(),
-                        )),
-                        2 => Err(input_error(
-                            "Color type CMYK is not supported in ACO files".into(),
-                        )),
-                        7 => Err(input_error(
-                            "Color type Lab is not supported in ACO files".into(),
-                        )),
-                        8 => Err(input_error(
-                            "Color type Grayscale is not supported in ACO files".into(),
-                        )),
-                        id => Err(input_error(format!("Unknown color type {id} in ACO file"))),
+                        1 => {
+                            file.error_in("Color type HSB is not supported in ACO files")
+                                .finish()
+                                .eprint_();
+                            Err(())
+                        }
+                        2 => {
+                            file.error_in("Color type CMYK is not supported in ACO files")
+                                .finish()
+                                .eprint_();
+                            Err(())
+                        }
+                        7 => {
+                            file.error_in("Color type Lab is not supported in ACO files")
+                                .finish()
+                                .eprint_();
+                            Err(())
+                        }
+                        8 => {
+                            file.error_in("Color type Grayscale is not supported in ACO files")
+                                .finish()
+                                .eprint_();
+                            Err(())
+                        }
+                        id => {
+                            file.error_in(format!("Unknown color type {id} in ACO file"))
+                                .finish()
+                                .eprint_();
+                            Err(())
+                        }
                     }?;
                     Ok(Some(Rgba::from(color).cgb_color(use_curve)))
                 })
@@ -324,28 +392,25 @@ pub fn parse_aco_file(
 /// The kind of file that rgbgfx itself emits.
 pub fn parse_gbc_file(
     mut file: Input,
-    path: &str,
+    _path: &str,
     _nb_colors_per_pal: NonZeroU8,
     _use_curve: bool,
-) -> Result<Vec<Vec<Option<Rgb16>>>, Diagnostic> {
+) -> Result<Vec<Vec<Option<Rgb16>>>, ()> {
     let mut pals = Vec::new();
     let mut buf = [0; 8];
     loop {
         match try_fill_buf(&mut file, &mut buf).map_err(|err| {
-            crate::input_error(format!("Failed to read GBC palette dump: {err}"), path)
+            file.error_in(format!("Failed to read GBC palette dump: {err}"))
+                .finish()
+                .eprint_();
         })? {
             Ok(()) => {}
             Err(0) => break,
             Err(n) => {
-                let mut diag = crate::input_error(
-                    "The GBC palette dump does not contain an integer amount of palettes",
-                    path,
-                );
-                diag.notes.push(format!(
-                    "There were only {n} bytes after the first {} palettes",
-                    pals.len()
-                ));
-                return Err(diag);
+                file.error_in(
+                    format!("The GBC palette dump does not contain an integer amount of palettes ({} plus {n} bytes)", pals.len())
+                ).finish().eprint_();
+                return Err(());
             }
         }
 
@@ -360,7 +425,7 @@ pub fn parse_gbc_file(
     Ok(pals)
 }
 
-fn parse_color(string: &str, file_path: &str, err_msg: &str) -> Result<Rgb, Diagnostic> {
+fn parse_color(string: &str, file_path: &str, err_msg: &str) -> Result<Rgb, ()> {
     fn inner(string: &str) -> Option<Rgb> {
         let (red_str, rest) = string.split_once(WHITESPACE_CHARS)?;
         let (green_str, blue_str) = rest.split_once(WHITESPACE_CHARS)?;
@@ -371,13 +436,13 @@ fn parse_color(string: &str, file_path: &str, err_msg: &str) -> Result<Rgb, Diag
     }
 
     inner(string).ok_or_else(|| {
-        let mut diag = crate::input_error(
+        Input::error(
+            file_path.as_ref(),
             format!("{err_msg}: failed to parse color out of \"{string}\""),
-            file_path,
-        );
-        diag.notes
-            .push("Expected a RGB color like `128 255 42`".into());
-        diag
+        )
+        .with_help("Expected a RGB color like `128 255 42`")
+        .finish()
+        .eprint_();
     })
 }
 

@@ -1,17 +1,16 @@
-
 #![deny(missing_docs)]
 
 use std::{fmt::Display, num::NonZeroU16, path::PathBuf, str::FromStr};
 
 use arrayvec::ArrayVec;
-use clap::Parser;
+use clap::{ColorChoice, Parser};
 
 use super::*;
 use crate::{rgb::Rgba, InputSlice};
 
 /// The command-line interface.
 #[derive(Debug, Parser)]
-#[clap(color = concolor_clap::color_choice())]
+#[clap(color = rgbds::common::cli::clap_color_choice())]
 #[command(
     name = "rgbgfx",
     version,
@@ -25,8 +24,9 @@ pub(super) struct Cli {
     /// ID to assign to the first tile generated in each bank
     #[arg(short, long, default_value_t = [0, 0].into())]
     pub(super) base_tiles: NumList<u8, 2>,
-    #[command(flatten)]
-    pub(super) color: concolor_clap::Color,
+    /// Controls when to use color
+    #[arg(long, default_value_t = ColorChoice::Auto)]
+    pub(super) color: ColorChoice,
     /// Attempt to use colors more adapted to real hardware
     #[arg(short = 'C', long)]
     pub(super) color_curve: bool,
@@ -334,23 +334,32 @@ impl FromStr for Rgb {
 }
 
 impl Cli {
-    pub(super) fn finish(self) -> Result<(Options, Option<super::PalSpec>), Diagnostic> {
+    pub(super) fn finish(self) -> Result<(Options, Option<super::PalSpec>), ()> {
+        rgbds::common::cli::apply_color_choice(self.color);
+
         let max_nb_colors_per_pal = 1 << self.depth;
         let nb_colors_per_pal = NonZeroU8::new(match self.palette_size {
             Some(size) => {
                 if size > max_nb_colors_per_pal {
-                    return Err(Diagnostic::error()
+                    return Err(crate::build_error()
                         .with_message(format!(
                             "{}bpp palettes cannot contain {size} colors",
                             self.depth
                         ))
-                        .with_notes(vec![format!("The maximum is {max_nb_colors_per_pal}")]));
+                        .with_note(format!("The maximum is {max_nb_colors_per_pal}"))
+                        .finish()
+                        .eprint_());
                 }
                 size
             }
             None => max_nb_colors_per_pal,
         })
-        .ok_or_else(|| Diagnostic::error().with_message("Palettes cannot contain zero colors"))?;
+        .ok_or_else(|| {
+            crate::build_error()
+                .with_message("Palettes cannot contain zero colors")
+                .finish()
+                .eprint_()
+        })?;
 
         let pal_spec = self
             .colors
