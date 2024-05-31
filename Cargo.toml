@@ -4,7 +4,8 @@ version = "0.1.0"
 edition = "2021"
 rust-version = "1.73" # 1.74 will drop support for older Apple platforms we wish to keep supporting.
 description = "The premier Game Boy assembly toolchain"
-homepage = "https://rgbds.gbdev.io"
+authors = [ "RGBDS maintainers <rgbds@gbdev.io>" ]
+homepage = "http://rgbds.gbdev.io"
 repository = "https://github.com/gbdev/rgbds"
 license = "MPL-2.0"
 keywords = ["rgbds", "gameboy", "asm", "assembly", "gamedev"]
@@ -16,21 +17,21 @@ default = ["rgbasm", "rgblink", "rgbfix", "rgbgfx"]
 
 rgbasm = [
 	# CLI.
-	"dep:clap", "dep:codespan-reporting",
+	"dep:clap", "dep:human-panic", "dep:codespan-reporting",
 	# Specific deps.
 	"dep:keyword-trie-gen", "dep:lalrpop", "dep:lalrpop-util", "dep:memmap2", "dep:string-interner", "dep:take_mut", "dep:warnings-gen",
 ]
 rgblink = [
 	# CLI.
-	"dep:clap", "dep:codespan-reporting",
+	"dep:clap", "dep:human-panic", "dep:codespan-reporting",
 ]
 rgbfix = [
 	# CLI.
-	"dep:clap", "dep:codespan-reporting",
+	"dep:clap", "dep:human-panic", "dep:codespan-reporting",
 ]
 rgbgfx = [
 	# CLI.
-	"dep:clap", "dep:ariadne", "dep:yansi",
+	"dep:clap", "dep:human-panic", "dep:ariadne", "dep:yansi",
 	# Specific deps.
 	"dep:arrayvec", "dep:bitvec", "dep:cfg-if", "dep:funty", "dep:plumers",
 ]
@@ -51,6 +52,7 @@ clap = { version = "4.4", features = ["derive", "wrap_help"], optional = true }
 # TODO: consider using `ariadne` instead.
 codespan-reporting = { version = "0.11.1", optional = true }
 funty = { version = "2.0.0", optional = true }
+human-panic = { version = "2.0.0", optional = true }
 keyword-trie-gen = { path = "keyword-trie-gen", optional = true }
 lalrpop-util = { version = "0.19.8", optional = true }
 memmap2 = { version = "0.5.8", optional = true }

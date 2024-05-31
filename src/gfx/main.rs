@@ -23,6 +23,7 @@ pub use rgbds::common::diagnostics::{
 };
 
 fn main() -> ExitCode {
+    rgbds::setup_panic_handler!();
     rgbds::common::cli::detect_default_color_choice();
 
     let args = rgbds::common::argfile::collect_expanded_args();
