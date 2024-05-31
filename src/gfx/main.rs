@@ -26,6 +26,8 @@ fn main() -> ExitCode {
     crate::common::cli::setup_panic_handler();
     crate::common::cli::detect_default_color_choice();
 
+    panic!("test");
+
     let args = crate::common::argfile::collect_expanded_args();
     let cli = Cli::parse_from(args); // This also calls `crate::common::cli::apply_color_choice`.
     let (options, pal_spec) = match cli.finish() {

@@ -87,3 +87,12 @@ required-features = ["rgbgfx"]
 
 [workspace]
 members = ["keyword-trie-gen", "warnings-gen"]
+
+# The profile that 'cargo dist' will build with
+# NOTE: for extra savings, pass `-Z build-std` to Cargo, and `-Zlocation-deetail=none` to rustc (via RUSTFLAGS or other).
+[profile.dist]
+inherits = "release"
+lto = "thin"
+codegen-units = 1
+# This deflates the binaries' size further, but at the cost of no backtraces in crash reports, making them hardly useful.
+#panic = "abort"
