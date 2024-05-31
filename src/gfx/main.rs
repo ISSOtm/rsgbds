@@ -24,10 +24,6 @@ use std::{
     process::ExitCode,
 };
 
-pub use crate::common::diagnostics::{
-    build_error, build_warning, ContentlessReport, Report, ReportBuilder,
-};
-
 fn main() -> ExitCode {
     crate::common::cli::setup_panic_handler();
     crate::common::cli::detect_default_color_choice();
@@ -54,6 +50,9 @@ use cli::*;
 mod color_set;
 #[path = "../common/mod.rs"]
 mod common;
+pub use common::diagnostics::{
+    build_error, build_warning, ContentlessReport, Report, ReportBuilder,
+};
 mod pal_packing;
 mod pal_spec;
 mod palette;

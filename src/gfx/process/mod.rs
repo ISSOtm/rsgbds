@@ -10,14 +10,14 @@ use std::{
     cmp::Ordering, collections::HashSet, fmt::Display, io::Write, num::NonZeroU16, path::Path,
 };
 
-use crate::common::{
-    dash_stdio::{Input, Output},
-    diagnostics::ContentlessReport,
-};
 use plumers::{image::Frame, prelude::*};
 
 use crate::{
     color_set::ColorSet,
+    common::{
+        dash_stdio::{Input, Output},
+        diagnostics::ContentlessReport,
+    },
     palette::Palette,
     rgb::{Opacity, Rgb, Rgba},
     InputSlice, Options, PalSpec,

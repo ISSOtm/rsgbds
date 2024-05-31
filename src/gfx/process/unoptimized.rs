@@ -11,13 +11,16 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::common::{dash_stdio::Output, diagnostics::ContentlessReport};
 use plumers::{
     color::Rgb32,
     image::{DynImage32, Frame},
 };
 
-use crate::{palette::Palette, InputSlice, Options, Report};
+use crate::{
+    common::{dash_stdio::Output, diagnostics::ContentlessReport},
+    palette::Palette,
+    InputSlice, Options,
+};
 
 use super::{AttrmapEntry, TileData};
 

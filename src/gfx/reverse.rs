@@ -8,14 +8,17 @@
 
 use std::num::{NonZeroU16, NonZeroUsize};
 
-use crate::common::{
-    dash_stdio::{Input, Output},
-    diagnostics::ContentlessReport,
-};
 use arrayvec::ArrayVec;
 use plumers::prelude::*;
 
-use crate::{rgb::Rgba, Nth, Options, PalSpec};
+use crate::{
+    common::{
+        dash_stdio::{Input, Output},
+        diagnostics::ContentlessReport,
+    },
+    rgb::Rgba,
+    Nth, Options, PalSpec,
+};
 
 pub(super) fn reverse(
     width: NonZeroU16,
