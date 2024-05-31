@@ -39,36 +39,36 @@ rgbgfx = [
 # TODO: move bin-only deps to separate features.
 [dependencies] # TODO: audit deps & features
 # TODO: use `thiserror` instead
-parse-display = { version = "0.6.0", default-features = false }
-try-from-discrim = "1.0.0"
+parse-display = { version = "0.6", default-features = false }
+try-from-discrim = "1.0"
 
 # The binaries' deps.
 
-ariadne = { version = "0.4.1", optional = true }
-arrayvec = { version = "0.7.4", optional = true }
-bitvec = { version = "1.0.1", optional = true }
-cfg-if = { version = "1.0.0", optional = true }
+ariadne = { version = "0.4", optional = true }
+arrayvec = { version = "0.7", optional = true }
+bitvec = { version = "1.0", optional = true }
+cfg-if = { version = "1.0", optional = true }
 clap = { version = "4.4", features = ["derive", "wrap_help"], optional = true }
 # TODO: consider using `ariadne` instead.
-codespan-reporting = { version = "0.11.1", optional = true }
-funty = { version = "2.0.0", optional = true }
-human-panic = { version = "2.0.0", optional = true }
+codespan-reporting = { version = "0.11", optional = true }
+funty = { version = "2.0", optional = true }
+human-panic = { version = "2.0", optional = true }
 keyword-trie-gen = { path = "keyword-trie-gen", optional = true }
-lalrpop-util = { version = "0.19.8", optional = true }
-memmap2 = { version = "0.5.8", optional = true }
+lalrpop-util = { version = "0.19.9", optional = true }
+memmap2 = { version = "0.5", optional = true }
 plumers = { path = "../plumers/plumers", optional = true }
 # TODO: maybe use feature `inline-more`
-string-interner = { version = "0.14.0", default-features = false, features = ["std","backends"], optional = true }
-take_mut = { version = "0.2.2", optional = true }
+string-interner = { version = "0.14", default-features = false, features = ["std","backends"], optional = true }
+take_mut = { version = "0.2", optional = true }
 warnings-gen = { path = "warnings-gen", optional = true }
-yansi = { version = "1.0.1", features = ["detect-env", "detect-tty", "hyperlink"], optional = true }
+yansi = { version = "1.0", features = ["detect-env", "detect-tty", "hyperlink"], optional = true }
 
 [build-dependencies]
-lalrpop = { version = "0.19.8", default-features = false, optional = true }
+lalrpop = { version = "0.19.9", default-features = false, optional = true }
 
 [dev-dependencies]
-libtest-mimic = "0.7.3"
-snapbox = { version = "0.5.9", features = ["path", "cmd"] }
+libtest-mimic = "0.7.2"
+snapbox = { version = "0.5.11", features = ["path", "cmd"] }
 
 [[bin]]
 name = "rgbasm"
