@@ -40,7 +40,7 @@ The design decisions I will have to take in it may heavily influence the other t
 - [ ] Integrate [`rgbds-obj`](https://github.com/ISSOtm/rgbds-obj) into a `rgbds` crate (which RGBLINK will use)
 - [ ] Rewrite RGBLINK
 - [ ] Rewrite RGBFIX
-- [ ] Rewrite RGBGFX
+- [x] Rewrite RGBGFX
 - [ ] Integrate [`rgbobj`](https://github.com/ISSOtm/rgbobj)
 - [ ] Add an [xtask](https://github.com/matklad/cargo-xtask) for generating man pages from the CLI structs, warning list, and things like that. (This would avoid forgetting to document new CLI args, for example.) [This will be useful](https://docs.rs/syn/latest/syn/fn.parse_file.html).
 
