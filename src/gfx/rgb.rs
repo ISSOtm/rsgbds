@@ -126,7 +126,7 @@ impl Rgba {
         match self.opacity().unwrap() {
             Opacity::Opaque => {
                 let (r, g, b) = if use_curve {
-                    // TODO: I wonder if this can be done without float math
+                    // Float math is largely necessary for gamma correction, much as it pains me.
                     let green_linear = (self.green as f64 / 255.).powf(2.2);
                     let blue_linear = (self.blue as f64 / 255.).powf(2.2);
                     // Originally: ((green_linear * 4. - blue_linear) / 3.).clamp(0., 1.)
