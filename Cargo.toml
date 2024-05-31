@@ -92,6 +92,12 @@ members = ["keyword-trie-gen", "warnings-gen"]
 # NOTE: for extra savings, pass `-Z build-std` to Cargo, and `-Zlocation-deetail=none` to rustc (via RUSTFLAGS or other).
 [profile.dist]
 inherits = "release"
+# NOTE: to enable LTO across programming language boundaries, see the "Linker-plugin-based LTO" chapter
+# of the rustc book.
+# To ensure LLD is the proper version, consider:
+# $ rustup component add llvm-tools
+# $ ln -s $(rustup which ../lib/rustlib/x86_64-unknown-linux-gnu/bin/rust-lld) ld.lld
+# $ RUSTFLAGS="-Clinker-plugin-lto -Clinker=clang -Clink-arg=-fuse-ld=$PWD/ld.lld -Clink-arg=-flto=thin" ...
 lto = "thin"
 codegen-units = 1
 # This deflates the binaries' size further, but at the cost of no backtraces in crash reports, making them hardly useful.
