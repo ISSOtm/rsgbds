@@ -4,12 +4,12 @@ use std::{
 };
 
 use plumers::prelude::*;
-use rgbds::{
-    common::{dash_stdio::Input, diagnostics::ContentlessReport},
-    WHITESPACE_CHARS,
-};
+use rgbds::WHITESPACE_CHARS;
 
-use crate::rgb::{Rgb, Rgba};
+use crate::{
+    common::{dash_stdio::Input, diagnostics::ContentlessReport},
+    rgb::{Rgb, Rgba},
+};
 
 pub fn parse_palette_file(
     format: &str,

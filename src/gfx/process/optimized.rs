@@ -8,7 +8,7 @@ use plumers::{
     image::Frame,
     prelude::{DynImage32, Rgb32},
 };
-use rgbds::common::{dash_stdio::Output, diagnostics::ContentlessReport};
+use crate::common::{dash_stdio::Output, diagnostics::ContentlessReport};
 
 use crate::{palette::Palette, InputSlice, Options, Report};
 

@@ -10,7 +10,7 @@ use crate::{rgb::Rgba, InputSlice};
 
 /// The command-line interface.
 #[derive(Debug, Parser)]
-#[clap(color = rgbds::common::cli::clap_color_choice())]
+#[clap(color = crate::common::cli::clap_color_choice())]
 #[command(
     name = "rgbgfx",
     version,
@@ -335,7 +335,7 @@ impl FromStr for Rgb {
 
 impl Cli {
     pub(super) fn finish(self) -> Result<(Options, Option<super::PalSpec>), ()> {
-        rgbds::common::cli::apply_color_choice(self.color);
+        crate::common::cli::apply_color_choice(self.color);
 
         let max_nb_colors_per_pal = 1 << self.depth;
         let nb_colors_per_pal = NonZeroU8::new(match self.palette_size {

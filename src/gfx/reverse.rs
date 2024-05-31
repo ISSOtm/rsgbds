@@ -2,7 +2,7 @@ use std::num::{NonZeroU16, NonZeroUsize};
 
 use arrayvec::ArrayVec;
 use plumers::prelude::*;
-use rgbds::common::{
+use crate::common::{
     dash_stdio::{Input, Output},
     diagnostics::ContentlessReport,
 };
@@ -50,7 +50,7 @@ pub(super) fn reverse(
     // Read the tile data.
 
     let output_path = options.output_path.as_ref().unwrap(); // Guaranteed by CLI.
-    let tiles = rgbds::common::dash_stdio::read(output_path).map_err(|err| {
+    let tiles = crate::common::dash_stdio::read(output_path).map_err(|err| {
         Input::error(output_path, format!("Failed to read tile data: {err}"))
             .finish()
             .eprint_();
@@ -78,7 +78,7 @@ pub(super) fn reverse(
 
     let (nb_tile_instances, tilemap) = match options.tilemap_path.as_ref() {
         Some(path) => {
-            let tilemap = rgbds::common::dash_stdio::read(path).map_err(|err| {
+            let tilemap = crate::common::dash_stdio::read(path).map_err(|err| {
                 Input::error(path, format!("Failed to read tilemap: {err}"))
                     .finish()
                     .eprint_();
@@ -206,7 +206,7 @@ pub(super) fn reverse(
     };
 
     let attrmap = options.attrmap_path.as_ref().map(|path| {
-        let attrmap = rgbds::common::dash_stdio::read(path).map_err(|err| {
+        let attrmap = crate::common::dash_stdio::read(path).map_err(|err| {
             Input::error(path, format!("Failed to open attribute map file: {err}"))
                 .finish()
                 .eprint_();
@@ -319,7 +319,7 @@ pub(super) fn reverse(
     }
 
     let palmap = options.palmap_path.as_ref().map(|path| {
-        let palmap = rgbds::common::dash_stdio::read(path).map_err(|err| {
+        let palmap = crate::common::dash_stdio::read(path).map_err(|err| {
             Input::error(path,format!("Failed to read palette map: {err}"))
                 .finish()
                 .eprint_();

@@ -18,16 +18,16 @@ use std::{
     process::ExitCode,
 };
 
-pub use rgbds::common::diagnostics::{
+pub use crate::common::diagnostics::{
     build_error, build_warning, ContentlessReport, Report, ReportBuilder,
 };
 
 fn main() -> ExitCode {
-    rgbds::setup_panic_handler!();
-    rgbds::common::cli::detect_default_color_choice();
+    crate::common::cli::setup_panic_handler();
+    crate::common::cli::detect_default_color_choice();
 
-    let args = rgbds::common::argfile::collect_expanded_args();
-    let cli = Cli::parse_from(args); // This also calls `rgbds::common::cli::apply_color_choice`.
+    let args = crate::common::argfile::collect_expanded_args();
+    let cli = Cli::parse_from(args); // This also calls `crate::common::cli::apply_color_choice`.
     let (options, pal_spec) = match cli.finish() {
         Ok((opt, spec)) => (opt, spec),
         Err(()) => {
@@ -46,6 +46,8 @@ fn main() -> ExitCode {
 mod cli;
 use cli::*;
 mod color_set;
+#[path = "../common/mod.rs"]
+mod common;
 mod pal_packing;
 mod pal_spec;
 mod palette;

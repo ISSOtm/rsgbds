@@ -7,7 +7,7 @@ use std::{
     path::Path,
 };
 
-use crate::WHITESPACE_CHARS;
+use rgbds::WHITESPACE_CHARS;
 
 use super::diagnostics::{build_error, ContentlessReport};
 

@@ -3,7 +3,7 @@ use std::{
 };
 
 use plumers::{image::Frame, prelude::*};
-use rgbds::common::{
+use crate::common::{
     dash_stdio::{Input, Output},
     diagnostics::ContentlessReport,
 };
