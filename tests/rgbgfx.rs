@@ -1,3 +1,11 @@
+/*
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/.
+ *
+ * SPDX-License-Identifier: MPL-2.0
+ */
+
 use std::{fmt::Display, fs::DirEntry, ops::Range, path::PathBuf, process::ExitCode};
 
 use libtest_mimic::{Arguments, Failed, Trial};

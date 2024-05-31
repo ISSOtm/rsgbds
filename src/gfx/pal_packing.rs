@@ -1,3 +1,11 @@
+/*
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/.
+ *
+ * SPDX-License-Identifier: MPL-2.0
+ */
+
 // The solvers here are picked from the paper at https://arxiv.org/abs/1605.00558:
 // "Algorithms for the Pagination Problem, a Bin Packing with Overlapping Items"
 // Their formulation of the problem consists in packing "tiles" into "pages"; here is a

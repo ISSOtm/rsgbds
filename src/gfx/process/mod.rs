@@ -1,12 +1,20 @@
+/*
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/.
+ *
+ * SPDX-License-Identifier: MPL-2.0
+ */
+
 use std::{
     cmp::Ordering, collections::HashSet, fmt::Display, io::Write, num::NonZeroU16, path::Path,
 };
 
-use plumers::{image::Frame, prelude::*};
 use crate::common::{
     dash_stdio::{Input, Output},
     diagnostics::ContentlessReport,
 };
+use plumers::{image::Frame, prelude::*};
 
 use crate::{
     color_set::ColorSet,
