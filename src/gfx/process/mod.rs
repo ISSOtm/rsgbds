@@ -514,7 +514,7 @@ fn make_palettes_as_specified(
             let mut pals_str = String::with_capacity(PREFIX.len() + palettes.len() * (4 * 7 + 5));
             pals_str.push_str(PREFIX);
             for palette in palettes {
-                write!(pals_str, "\n{}", palette).unwrap();
+                write!(pals_str, "\n  {palette}").unwrap();
             }
             pals_str
         }
