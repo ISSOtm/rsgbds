@@ -83,7 +83,11 @@ fn test_png(input_path: PathBuf, use_stdin: bool) -> Result<(), Failed> {
         cmd.arg(&input_path).stdin([].as_slice())
     }
     .assert()
-    .with_assert(Assert::new().substitutions(redactions));
+    .with_assert(
+        Assert::new()
+            .substitutions(redactions)
+            .action_env("SNAPSHOTS_GFX"),
+    );
 
     // Note that these checks panic instead of returning `Err()`. Ah well.
     let err_file_path = input_path.with_extension("err");
