@@ -56,7 +56,7 @@ pub fn parse_palette_file(
     }
 }
 
-/// https://www.selapa.net/swatches/colors/fileformats.php#psp_pal
+/// <https://www.selapa.net/swatches/colors/fileformats.php#psp_pal>
 pub fn parse_psp_file(
     file: Input,
     path: &str,
@@ -158,7 +158,7 @@ pub fn parse_psp_file(
     Ok(palettes)
 }
 
-/// https://gitlab.gnome.org/GNOME/gimp/-/blob/gimp-2-10/app/core/gimppalette-load.c#L39
+/// <https://gitlab.gnome.org/GNOME/gimp/-/blob/gimp-2-10/app/core/gimppalette-load.c#L39>
 pub fn parse_gpl_file(
     file: Input,
     path: &str,
@@ -234,7 +234,7 @@ pub fn parse_gpl_file(
     Ok(palettes)
 }
 
-/// https://lospec.com/palette-list/tag/gbc
+/// <https://lospec.com/palette-list/tag/gbc>
 pub fn parse_hex_file(
     file: Input,
     path: &str,
@@ -296,7 +296,7 @@ pub fn parse_hex_file(
     Ok(palettes)
 }
 
-/// https://www.adobe.com/devnet-apps/photoshop/fileformatashtml/#50577411_pgfId-1070626
+/// <https://www.adobe.com/devnet-apps/photoshop/fileformatashtml/#50577411_pgfId-1070626>
 pub fn parse_act_file(
     mut file: Input,
     path: &str,
@@ -356,7 +356,7 @@ pub fn parse_act_file(
         .collect())
 }
 
-/// https://www.adobe.com/devnet-apps/photoshop/fileformatashtml/#50577411_pgfId-1055819
+/// <https://www.adobe.com/devnet-apps/photoshop/fileformatashtml/#50577411_pgfId-1055819>
 pub fn parse_aco_file(
     mut file: Input,
     path: &str,
