@@ -24,7 +24,7 @@ use std::{
 };
 
 fn main() -> ExitCode {
-    // `.finish()` also calls `crate::common::cli::apply_color_choice`.
+    // `Cli::finish()` also calls `crate::common::cli::apply_color_choice`.
     let (options, pal_spec) = match crate::common::cli::setup_and_parse_args().and_then(Cli::finish)
     {
         Ok(cli) => cli,
