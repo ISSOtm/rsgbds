@@ -12,6 +12,7 @@
 //! so none of this is covered by SemVer.
 
 pub mod argfile;
+shadow_rs::shadow!(build);
 pub mod cli;
 pub mod dash_stdio;
 pub mod diagnostics;

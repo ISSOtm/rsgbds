@@ -9,4 +9,12 @@
 fn main() {
     #[cfg(any(feature = "rgbasm", feature = "rgblink"))]
     lalrpop::process_root().expect("Parser generation failed");
+
+    #[cfg(any(
+        feature = "rgbasm",
+        feature = "rgblink",
+        feature = "rgbfix",
+        feature = "rgbgfx"
+    ))]
+    shadow_rs::new().expect("Shadow info generation failed");
 }

@@ -21,7 +21,8 @@ use crate::{rgb::Rgba, InputSlice};
 #[clap(color = crate::common::cli::clap_color_choice())]
 #[command(
     name = "rgbgfx",
-    version,
+    version = crate::common::build::PKG_VERSION,
+    long_version = crate::common::build::CLAP_LONG_VERSION,
     about = "Game Boy graphics converter",
     long_about = "Converts images into data suitable for display on the Game Boy and Game Boy Color, or vice-versa.",
     after_help = "For comprehensive help, run `man rgbgfx`, or go to http://rgbds.gbdev.io/docs/",

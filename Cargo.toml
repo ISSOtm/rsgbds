@@ -17,21 +17,21 @@ default = ["rgbasm", "rgblink", "rgbfix", "rgbgfx"]
 
 rgbasm = [
 	# CLI.
-	"dep:clap", "dep:human-panic", "dep:codespan-reporting", "dep:sysexits",
+	"dep:clap", "dep:human-panic", "dep:codespan-reporting", "dep:shadow-rs", "dep:sysexits",
 	# Specific deps.
 	"dep:keyword-trie-gen", "dep:lalrpop", "dep:lalrpop-util", "dep:memmap2", "dep:string-interner", "dep:take_mut", "dep:warnings-gen",
 ]
 rgblink = [
 	# CLI.
-	"dep:clap", "dep:human-panic", "dep:codespan-reporting", "dep:sysexits",
+	"dep:clap", "dep:human-panic", "dep:codespan-reporting", "dep:shadow-rs", "dep:sysexits",
 ]
 rgbfix = [
 	# CLI.
-	"dep:clap", "dep:human-panic", "dep:codespan-reporting", "dep:sysexits",
+	"dep:clap", "dep:human-panic", "dep:codespan-reporting", "dep:shadow-rs", "dep:sysexits",
 ]
 rgbgfx = [
 	# CLI.
-	"dep:clap", "dep:human-panic", "dep:ariadne", "dep:yansi", "dep:sysexits",
+	"dep:clap", "dep:human-panic", "dep:ariadne", "dep:yansi", "dep:shadow-rs", "dep:sysexits",
 	# Specific deps.
 	"dep:arrayvec", "dep:bitvec", "dep:cfg-if", "dep:funty", "dep:plumers",
 ]
@@ -57,6 +57,7 @@ keyword-trie-gen = { path = "keyword-trie-gen", optional = true }
 lalrpop-util = { version = "0.19.9", optional = true }
 memmap2 = { version = "0.5", optional = true }
 plumers = { path = "../plumers/plumers", optional = true }
+shadow-rs = { version = "0.28", optional = true }
 # TODO: maybe use feature `inline-more`
 string-interner = { version = "0.14", default-features = false, features = ["std","backends"], optional = true }
 sysexits = { version = "0.8", optional = true }
@@ -66,6 +67,7 @@ yansi = { version = "1.0", features = ["detect-env", "detect-tty", "hyperlink"],
 
 [build-dependencies]
 lalrpop = { version = "0.19.9", default-features = false, optional = true }
+shadow-rs = { version = "0.28", optional = true }
 
 [dev-dependencies]
 libtest-mimic = "0.7.2"
