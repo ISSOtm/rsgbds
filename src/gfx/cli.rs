@@ -349,14 +349,15 @@ impl Cli {
         let nb_colors_per_pal = NonZeroU8::new(match self.palette_size {
             Some(size) => {
                 if size > max_nb_colors_per_pal {
-                    return Err(crate::build_error()
+                    crate::build_error()
                         .with_message(format!(
                             "{}bpp palettes cannot contain {size} colors",
                             self.depth
                         ))
                         .with_note(format!("The maximum is {max_nb_colors_per_pal}"))
                         .finish()
-                        .eprint_());
+                        .eprint_();
+                    return Err(());
                 }
                 size
             }
