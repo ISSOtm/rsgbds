@@ -13,7 +13,6 @@
 )]
 #![debugger_visualizer(gdb_script_file = "../../maintainer/gdb_pretty_printers.py")]
 
-use clap::Parser;
 use plumers::prelude::*;
 use sysexits::ExitCode;
 
@@ -25,17 +24,11 @@ use std::{
 };
 
 fn main() -> ExitCode {
-    crate::common::cli::setup_panic_handler();
-    crate::common::cli::detect_default_color_choice();
-
-    let args = crate::common::argfile::collect_expanded_args();
-    let cli = Cli::parse_from(args);
     // `.finish()` also calls `crate::common::cli::apply_color_choice`.
-    let (options, pal_spec) = match cli.finish() {
-        Ok((opt, spec)) => (opt, spec),
-        Err(()) => {
-            return ExitCode::Usage;
-        }
+    let (options, pal_spec) = match crate::common::cli::setup_and_parse_args().and_then(Cli::finish)
+    {
+        Ok(cli) => cli,
+        Err(()) => return ExitCode::Usage,
     };
 
     // TODO: verbosity easter egg

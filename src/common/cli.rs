@@ -6,10 +6,18 @@
  * SPDX-License-Identifier: MPL-2.0
  */
 
-use clap::ColorChoice;
+use clap::{ColorChoice, Parser};
 use yansi::Condition;
 
-pub fn setup_panic_handler() {
+pub fn setup_and_parse_args<Cli: Parser>() -> Result<Cli, ()> {
+    setup_panic_handler();
+    detect_default_color_choice();
+
+    let args = super::argfile::collect_expanded_args();
+    Cli::try_parse_from(args).map_err(|err| err.print().expect("Failed to print CLI error"))
+}
+
+fn setup_panic_handler() {
     human_panic::setup_panic!(human_panic::Metadata::new(
         env!("CARGO_BIN_NAME"),
         env!("CARGO_PKG_VERSION")
@@ -26,7 +34,7 @@ pub fn setup_panic_handler() {
     ));
 }
 
-pub fn detect_default_color_choice() {
+fn detect_default_color_choice() {
     yansi::whenever(Condition::cached(
         Condition::os_support()
             && Condition::stderr_is_tty_live()
