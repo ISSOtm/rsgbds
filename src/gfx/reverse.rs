@@ -10,6 +10,7 @@ use std::num::{NonZeroU16, NonZeroUsize};
 
 use arrayvec::ArrayVec;
 use plumers::prelude::*;
+use sysexits::ExitCode;
 
 use crate::{
     common::{
@@ -24,7 +25,7 @@ pub(super) fn reverse(
     width: NonZeroU16,
     options: &Options,
     pal_spec: Option<PalSpec>,
-) -> Result<(), ()> {
+) -> Result<(), ExitCode> {
     // Check for weird CLI flag combinations.
 
     if options.allow_dedup && options.tilemap_path.is_none() {
@@ -65,6 +66,7 @@ pub(super) fn reverse(
         Input::error(output_path, format!("Failed to read tile data: {err}"))
             .finish()
             .eprint_();
+        ExitCode::IoErr
     })?;
     let tile_len = 8 * usize::from(options.bit_depth);
     let nb_tiles = tiles.len() / tile_len;
@@ -82,7 +84,7 @@ pub(super) fn reverse(
             .with_help("Consider specifying a different bit depth")
             .finish()
             .eprint_();
-        return Err(());
+        return Err(ExitCode::DataErr);
     }
 
     // Determine the image's dimensions.
@@ -93,6 +95,7 @@ pub(super) fn reverse(
                 Input::error(path, format!("Failed to read tilemap: {err}"))
                     .finish()
                     .eprint_();
+                ExitCode::IoErr
             })?;
             (tilemap.len(), Some(tilemap))
         }
@@ -104,6 +107,7 @@ pub(super) fn reverse(
             .with_message("Cannot generate an empty image")
             .finish()
             .eprint_();
+        ExitCode::DataErr
     })?;
     if let Some(&[bank0, bank1]) = options.max_nb_tiles.as_ref() {
         if nb_tile_instances.get() > usize::from(bank0) + usize::from(bank1) {
@@ -111,7 +115,7 @@ pub(super) fn reverse(
                 .with_message(format!("Read more tiles ({nb_tile_instances}) than the limit would permit ({bank0} + {bank1})"))
                 .finish()
                 .eprint_();
-            return Err(());
+            return Err(ExitCode::DataErr);
         }
     }
 
@@ -119,7 +123,7 @@ pub(super) fn reverse(
         crate::build_error().with_message(format!("Total number of tiles ({nb_tile_instances}) is not a multiple of the image width ({width} tiles)"))
             .finish()
             .eprint_();
-        return Err(());
+        return Err(ExitCode::DataErr);
     }
     let height = nb_tile_instances.get() / NonZeroUsize::from(width).get();
     let coords = |i| (i % usize::from(width.get()), i / usize::from(width.get()));
@@ -131,6 +135,7 @@ pub(super) fn reverse(
             Input::error(path, format!("Failed to open palettes file: {err}"))
                 .finish()
                 .eprint_();
+            ExitCode::NoInput
         })?;
         let mut palettes = Vec::new(); // A `stat` call is probably slower than a couple of reallocs.
 
@@ -143,6 +148,7 @@ pub(super) fn reverse(
             file.error_in(format!("Error reading palette data: {err}"))
                 .finish()
                 .eprint_();
+            ExitCode::IoErr
         })? {
             let mut palette = ArrayVec::new();
             for i in 0..usize::from(options.nb_colors_per_pal.get()) {
@@ -221,6 +227,7 @@ pub(super) fn reverse(
             Input::error(path, format!("Failed to open attribute map file: {err}"))
                 .finish()
                 .eprint_();
+            ExitCode::IoErr
         })?;
 
         if attrmap.len() != nb_tile_instances.get() {
@@ -231,7 +238,7 @@ pub(super) fn reverse(
                 )
                 .finish()
                 .eprint_();
-            return Err(());
+            return Err(ExitCode::DataErr);
         }
 
         // Scan through the attributes for inconsistencies.
@@ -239,7 +246,7 @@ pub(super) fn reverse(
         // - Checking those during the image generation is more harmful to optimization.
         // - It helps keep the code more "focused" and locally less complex.
         let mut bad = false;
-        for (i,attr) in attrmap.iter().enumerate() {
+        for (i, attr) in attrmap.iter().enumerate() {
             let (x, y) = coords(i);
 
             if usize::from(attr & 0b111) >= palettes.len() {
@@ -273,7 +280,7 @@ pub(super) fn reverse(
                 .with_note("See previous errors")
                 .finish()
                 .eprint_();
-            return Err(());
+            return Err(ExitCode::DataErr);
         }
 
         Ok(attrmap)
@@ -331,9 +338,10 @@ pub(super) fn reverse(
 
     let palmap = options.palmap_path.as_ref().map(|path| {
         let palmap = crate::common::dash_stdio::read(path).map_err(|err| {
-            Input::error(path,format!("Failed to read palette map: {err}"))
+            Input::error(path, format!("Failed to read palette map: {err}"))
                 .finish()
                 .eprint_();
+            ExitCode::IoErr
         })?;
 
         if palmap.len() != nb_tile_instances.get() {
@@ -345,7 +353,7 @@ pub(super) fn reverse(
                 ))
                 .finish()
                 .eprint_();
-            return Err(());
+            return Err(ExitCode::DataErr);
         }
 
         Ok(palmap)
@@ -434,6 +442,7 @@ pub(super) fn reverse(
                                 ))
                                 .finish()
                                 .eprint_();
+                                ExitCode::DataErr
                         })?;
                     *image.pixel_mut(0, tile_x * 8 + x, tile_y * 8 + y) = color.into();
 
@@ -453,6 +462,7 @@ pub(super) fn reverse(
         Output::error(path, format!("Failed to create image file: {err}"))
             .finish()
             .eprint_();
+        ExitCode::CantCreat
     })?;
     image
         .store(plumers::image::Output(&mut output))
@@ -461,6 +471,7 @@ pub(super) fn reverse(
                 .error_in(format!("Failed to write image file: {err}"))
                 .finish()
                 .eprint_();
+            ExitCode::IoErr
         })?;
 
     Ok(())

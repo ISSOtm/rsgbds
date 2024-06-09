@@ -16,6 +16,7 @@ use plumers::{
     image::Frame,
     prelude::{DynImage32, Rgb32},
 };
+use sysexits::ExitCode;
 
 use crate::{
     common::{dash_stdio::Output, diagnostics::ContentlessReport},
@@ -100,11 +101,12 @@ pub(super) fn output_tile_data(
     tile_data: &[TileData],
     path: &Path,
     options: &Options,
-) -> Result<(), ()> {
+) -> Result<(), ExitCode> {
     let mut output = Output::new(path).map_err(|err| {
         Output::error(path, format!("Failed to create tile data file: {err}"))
             .finish()
-            .eprint_()
+            .eprint_();
+        ExitCode::CantCreat
     })?;
 
     let nb_tiles = tile_data.len().saturating_sub(options.trim);
@@ -113,18 +115,20 @@ pub(super) fn output_tile_data(
             output
                 .error_in(format!("Failed to write tile data: {err}"))
                 .finish()
-                .eprint_()
+                .eprint_();
+            ExitCode::IoErr
         })?;
     }
 
     Ok(())
 }
 
-pub(super) fn output_tilemap(attrmap: &[AttrmapEntry], path: &Path) -> Result<(), ()> {
+pub(super) fn output_tilemap(attrmap: &[AttrmapEntry], path: &Path) -> Result<(), ExitCode> {
     let mut output = Output::new(path).map_err(|err| {
         Output::error(path, format!("Failed to create tilemap file: {err}"))
             .finish()
-            .eprint_()
+            .eprint_();
+        ExitCode::CantCreat
     })?;
 
     for attr in attrmap {
@@ -132,7 +136,8 @@ pub(super) fn output_tilemap(attrmap: &[AttrmapEntry], path: &Path) -> Result<()
             output
                 .error_in(format!("Failed to write tilemap: {err}"))
                 .finish()
-                .eprint_()
+                .eprint_();
+            ExitCode::IoErr
         })?;
     }
 
@@ -143,11 +148,12 @@ pub(super) fn output_attrmap(
     attrmap: &[AttrmapEntry],
     mappings: &[usize],
     path: &Path,
-) -> Result<(), ()> {
+) -> Result<(), ExitCode> {
     let mut output = Output::new(path).map_err(|err| {
         Output::error(path, format!("Failed to create attribute map file: {err}"))
             .finish()
-            .eprint_()
+            .eprint_();
+        ExitCode::CantCreat
     })?;
 
     for attr in attrmap {
@@ -160,7 +166,8 @@ pub(super) fn output_attrmap(
                 output
                     .error_in(format!("Failed to write attribute map: {err}"))
                     .finish()
-                    .eprint_()
+                    .eprint_();
+                ExitCode::IoErr
             })?;
     }
 
@@ -171,11 +178,12 @@ pub(super) fn output_palmap(
     attrmap: &[AttrmapEntry],
     mappings: &[usize],
     path: &Path,
-) -> Result<(), ()> {
+) -> Result<(), ExitCode> {
     let mut output = Output::new(path).map_err(|err| {
         Output::error(path, format!("Failed to create palette map file: {err}"))
             .finish()
-            .eprint_()
+            .eprint_();
+        ExitCode::CantCreat
     })?;
 
     for attr in attrmap {
@@ -185,7 +193,8 @@ pub(super) fn output_palmap(
                 output
                     .error_in(format!("Failed to write palette map: {err}"))
                     .finish()
-                    .eprint_()
+                    .eprint_();
+                ExitCode::IoErr
             })?;
     }
 

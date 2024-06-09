@@ -15,13 +15,13 @@
 
 use clap::Parser;
 use plumers::prelude::*;
+use sysexits::ExitCode;
 
 use std::{
     fmt::Display,
     io::Read,
     num::{NonZeroU16, NonZeroU8},
     path::PathBuf,
-    process::ExitCode,
 };
 
 fn main() -> ExitCode {
@@ -29,20 +29,18 @@ fn main() -> ExitCode {
     crate::common::cli::detect_default_color_choice();
 
     let args = crate::common::argfile::collect_expanded_args();
-    let cli = Cli::parse_from(args); // This also calls `crate::common::cli::apply_color_choice`.
+    let cli = Cli::parse_from(args);
+    // `.finish()` also calls `crate::common::cli::apply_color_choice`.
     let (options, pal_spec) = match cli.finish() {
         Ok((opt, spec)) => (opt, spec),
         Err(()) => {
-            return ExitCode::FAILURE;
+            return ExitCode::Usage;
         }
     };
 
     // TODO: verbosity easter egg
 
-    match run(options, pal_spec) {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(()) => ExitCode::FAILURE,
-    }
+    run(options, pal_spec).err().unwrap_or(ExitCode::Ok)
 }
 
 mod cli;
@@ -61,7 +59,7 @@ mod reverse;
 mod rgb;
 use rgb::Rgb;
 
-fn run(options: Options, pal_spec: Option<PalSpec>) -> Result<(), ()> {
+fn run(options: Options, pal_spec: Option<PalSpec>) -> Result<(), ExitCode> {
     if let Some(&width) = &options.reversed_width.as_ref() {
         reverse::reverse(width, &options, pal_spec)
     } else if let Some(input_path) = &options.input_path {
@@ -73,7 +71,7 @@ fn run(options: Options, pal_spec: Option<PalSpec>) -> Result<(), ()> {
                     .with_message("An embedded color spec cannot be used without an input image")
                     .finish()
                     .eprint_();
-                Err(())
+                Err(ExitCode::Usage)
             }
             PalSpec::Explicit(pal_specs) => {
                 process::process_palettes_only(&pal_specs, palettes_path, &options)
@@ -87,7 +85,7 @@ fn run(options: Options, pal_spec: Option<PalSpec>) -> Result<(), ()> {
             );
         }
         builder.finish().eprint_();
-        Err(())
+        Err(ExitCode::Usage)
     }
 }
 

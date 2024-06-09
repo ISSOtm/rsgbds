@@ -15,6 +15,7 @@ use plumers::{
     color::Rgb32,
     image::{DynImage32, Frame},
 };
+use sysexits::ExitCode;
 
 use crate::{
     common::{dash_stdio::Output, diagnostics::ContentlessReport},
@@ -33,11 +34,12 @@ pub(super) fn output_tile_data(
     input_slice: &InputSlice,
     options: &Options,
     has_transparency: bool,
-) -> Result<(), ()> {
+) -> Result<(), ExitCode> {
     let mut output = Output::new(path).map_err(|err| {
         Output::error(path, format!("Failed to create tile data file: {err}"))
             .finish()
-            .eprint_()
+            .eprint_();
+        ExitCode::CantCreat
     })?;
 
     let width_in_tiles = input_slice.width.get();
@@ -67,7 +69,8 @@ pub(super) fn output_tile_data(
                         output
                             .error_in(format!("Failed to write tile data: {err}"))
                             .finish()
-                            .eprint_()
+                            .eprint_();
+                        ExitCode::IoErr
                     })?;
             }
         }
@@ -80,18 +83,19 @@ pub(super) fn output_maps(
     attrmap: &[AttrmapEntry],
     mappings: &[usize],
     options: &Options,
-) -> Result<(), ()> {
+) -> Result<(), ExitCode> {
     fn auto_open_path<'path>(
         path: &'path Option<PathBuf>,
         what: &'static str,
-    ) -> Result<Option<(&'path PathBuf, Output<'path>)>, ()> {
+    ) -> Result<Option<(&'path PathBuf, Output<'path>)>, ExitCode> {
         path.as_ref()
             .map(|path| {
                 Output::new(path)
                     .map_err(|err| {
                         Output::error(path, format!("Failed to create {what} file: {err}"))
                             .finish()
-                            .eprint_()
+                            .eprint_();
+                        ExitCode::CantCreat
                     })
                     .map(|file| (path, file))
             })
@@ -119,7 +123,8 @@ pub(super) fn output_maps(
                         output
                             .error_in(format!("Failed to write {what}: {err}"))
                             .finish()
-                            .eprint_()
+                            .eprint_();
+                        ExitCode::IoErr
                     })
                 })
         };

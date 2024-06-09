@@ -11,6 +11,7 @@ use std::{
 };
 
 use plumers::{image::Frame, prelude::*};
+use sysexits::ExitCode;
 
 use crate::{
     color_set::ColorSet,
@@ -32,11 +33,12 @@ pub(crate) fn process(
     input_path: &Path,
     options: &Options,
     pal_spec: Option<PalSpec>,
-) -> Result<(), ()> {
+) -> Result<(), ExitCode> {
     let mut file = Input::new(input_path).map_err(|err| {
         Input::error(input_path, format!("Failed to open input image: {err}"))
             .finish()
             .eprint_();
+        ExitCode::NoInput
     })?;
     let image = DynImage32::load(
         plumers::image::Input(&mut file),
@@ -53,6 +55,7 @@ pub(crate) fn process(
         file.error_in(format!("Couldn't load the input image: {err}"))
             .finish()
             .eprint_();
+        ExitCode::DataErr
     })?;
 
     if image.nb_frames() != 1 {
@@ -76,7 +79,7 @@ pub(crate) fn process(
                 )
                 .finish()
                 .eprint_();
-                return Err(());
+                return Err(ExitCode::DataErr);
             }
 
             // Panicking if the input image exceeds 524288 pixels in either dimension seems reasonable.
@@ -91,7 +94,7 @@ pub(crate) fn process(
                     .with_message("The input image cannot be empty")
                     .finish()
                     .eprint_();
-                return Err(());
+                return Err(ExitCode::DataErr);
             };
 
             InputSlice {
@@ -119,6 +122,7 @@ pub(crate) fn process(
                     )
                     .finish()
                     .eprint_();
+                ExitCode::DataErr
             })?;
             make_palettes_as_specified(
                 &[pal
@@ -156,7 +160,7 @@ pub(crate) fn process(
             ))
             .finish()
             .eprint_();
-        return Err(());
+        return Err(ExitCode::DataErr);
     }
 
     // If there are more than 8 palettes, and attrmap is requested but not palmap, then warn.
@@ -213,7 +217,7 @@ pub(crate) fn process(
                     .with_note(nb_tiles_msg)
                     .finish()
                     .eprint_();
-                return Err(());
+                return Err(ExitCode::DataErr);
             }
         }
 
@@ -245,7 +249,7 @@ pub(crate) fn process_palettes_only(
     pal_specs: &[Vec<Option<Rgb16>>],
     path: &Path,
     options: &Options,
-) -> Result<(), ()> {
+) -> Result<(), ExitCode> {
     let (_, palettes) = make_palettes_as_specified(pal_specs, &[], false)?;
 
     output_palettes(&palettes, path, options)?;
@@ -260,7 +264,7 @@ pub(crate) fn process_palettes_only(
             ))
             .finish()
             .eprint_();
-        return Err(());
+        return Err(ExitCode::DataErr);
     }
 
     Ok(())
@@ -272,7 +276,7 @@ fn collect_image_colors(
     image: &DynImage32,
     slice: &InputSlice,
     options: &Options,
-) -> Result<(Vec<Rgb16>, bool), ()> {
+) -> Result<(Vec<Rgb16>, bool), ExitCode> {
     let mut has_transparency = false;
     let mut cgb_colors: [_; 0x8000] = std::array::from_fn(|_i| None);
     let mut ambiguous_alpha_pos = Vec::new();
@@ -342,7 +346,7 @@ fn collect_image_colors(
             .with_help(acceptable_alpha)
             .finish()
             .eprint_();
-        return Err(());
+        return Err(ExitCode::DataErr);
     }
 
     let mut image_colors = match image.palette() {
@@ -376,7 +380,7 @@ fn collect_color_sets(
     slice: &InputSlice,
     options: &Options,
     has_transparency: bool,
-) -> Result<(Vec<ColorSet>, Vec<AttrmapEntry>), ()> {
+) -> Result<(Vec<ColorSet>, Vec<AttrmapEntry>), ExitCode> {
     let colors_per_palette = options.colors_per_palette(has_transparency);
 
     let mut color_sets = Vec::new();
@@ -417,7 +421,7 @@ fn collect_color_sets(
             ))
             .finish()
             .eprint_();
-            return Err(());
+            return Err(ExitCode::DataErr);
         }
 
         // Register the color set, avoiding overlap with existing ones.
@@ -484,7 +488,7 @@ fn make_palettes_as_specified(
     pal_specs: &[Vec<Option<Rgb16>>],
     color_sets: &[ColorSet],
     has_transparency: bool,
-) -> Result<(Vec<usize>, Vec<Palette>), ()> {
+) -> Result<(Vec<usize>, Vec<Palette>), ExitCode> {
     // Convert the palette spec to actual palettes.
     let palettes = Vec::from_iter(pal_specs.iter().map(|spec| {
         let mut palette = Palette::new(has_transparency);
@@ -536,15 +540,16 @@ fn make_palettes_as_specified(
             .with_note(note)
             .finish()
             .eprint_();
-        Err(())
+        Err(ExitCode::DataErr)
     }
 }
 
-fn output_palettes(palettes: &[Palette], path: &Path, options: &Options) -> Result<(), ()> {
+fn output_palettes(palettes: &[Palette], path: &Path, options: &Options) -> Result<(), ExitCode> {
     let mut output = Output::new(path).map_err(|err| {
         Output::error(path, format!("Failed to create palette file: {err}"))
             .finish()
             .eprint_();
+        ExitCode::CantCreat
     })?;
 
     for palette in palettes {
@@ -558,6 +563,7 @@ fn output_palettes(palettes: &[Palette], path: &Path, options: &Options) -> Resu
                     .error_in(format!("Failed to write palettes: {err}"))
                     .finish()
                     .eprint_();
+                ExitCode::IoErr
             })?;
         }
     }
