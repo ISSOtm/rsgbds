@@ -209,9 +209,9 @@ impl Rpn {
 
         macro_rules! unary_op {
             (|$value:ident| $res:expr) => {
-                if let Ok(value) = eval_stack.last_mut().ok_or(EvalError::EvalStackEmpty)? {
-                    let $value = *value;
-                    *value = $res;
+                if let Ok(value_) = eval_stack.last_mut().ok_or(EvalError::EvalStackEmpty)? {
+                    let $value = *value_;
+                    *value_ = $res;
                 }
             };
         }

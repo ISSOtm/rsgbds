@@ -18,6 +18,9 @@ use crate::{rgb::Rgba, InputSlice};
 
 /// The command-line interface.
 #[derive(Debug, Parser)]
+// We use placeholders in the CLI descriptions, and unfortunately the usual syntax for that looks like HTML tags.
+// Since this is internal-only anyway, privilege the CLI UX.
+#[allow(rustdoc::invalid_html_tags)]
 #[clap(color = crate::common::cli::clap_color_choice())]
 #[command(
     name = "rgbgfx",
@@ -32,35 +35,35 @@ use crate::{rgb::Rgba, InputSlice};
 pub(super) struct Cli {
     /// ID to assign to the first tile generated in each bank
     #[arg(short, long, default_value_t = [0, 0].into())]
-    pub(super) base_tiles: NumList<u8, 2>,
+    base_tiles: NumList<u8, 2>,
     /// Controls when to use color
     #[arg(long, default_value_t = ColorChoice::Auto)]
-    pub(super) color: ColorChoice,
+    color: ColorChoice,
     /// Attempt to use colors more adapted to real hardware
     #[arg(short = 'C', long)]
-    pub(super) color_curve: bool,
+    color_curve: bool,
     /// Use the specified color palettes instead of automatically determining some
     #[arg(short, long)]
-    pub(super) colors: Option<PalSpec>,
+    colors: Option<PalSpec>,
     /// Set the bit depth of the tiles
     ///
     /// This affects both the generated tile data, and the maximum number of colors per palette.
-    #[arg(short, long, default_value_t = 2, value_name = "bpp", value_parser = parse_number::<u8>)]
-    pub(super) depth: u8,
+    #[arg(short, long, default_value_t = 2, value_name = "bpp", value_parser = crate::common::cli::parse_number::<u8>)]
+    depth: u8,
     /// Only process a portion of the image
     #[arg(short = 'L', long)]
-    pub(super) slice: Option<InputSlice>,
+    slice: Option<InputSlice>,
     /// Permit de-duplication of tiles that are a mirror of another one
     #[arg(short, long)]
-    pub(super) mirror_tiles: bool,
+    mirror_tiles: bool,
     /// Maximum number of tiles to generate for each bank
     // TODO: fail parsing if the value is > 256!
     #[arg(short = 'N', long)]
-    pub(super) nb_tiles: Option<NumList<u16, 2>>,
+    nb_tiles: Option<NumList<u16, 2>>,
     /// Limit how many palettes can be generated
     // TODO: fail parsing if the value is > 256!
-    #[arg(short, long, default_value_t = 8, value_name = "nb of palettes", value_parser = parse_number::<u16>)]
-    pub(super) nb_palettes: u16,
+    #[arg(short, long, default_value_t = 8, value_name = "nb of palettes", value_parser = crate::common::cli::parse_number::<u16>)]
+    nb_palettes: u16,
     /// Attempt to re-create a source image from binary data
     ///
     /// Note that this makes the input become an output, and outputs become inputs!
@@ -71,38 +74,38 @@ pub(super) struct Cli {
         value_name = "image width (in tiles)",
         requires = "output"
     )]
-    pub(super) reverse: Option<NonZeroU16>,
+    reverse: Option<NonZeroU16>,
     /// Limit how many opaque colors each palette contains
     ///
     /// If applicable, this limit does not include the slot reserved for transparency!
     ///
     /// [default: <max size for bit depth, see --depth>]
-    #[arg(short = 's', long, value_name = "nb of colors", value_parser = parse_number::<u8>)]
-    pub(super) palette_size: Option<u8>,
+    #[arg(short = 's', long, value_name = "nb of colors", value_parser = crate::common::cli::parse_number::<u8>)]
+    palette_size: Option<u8>,
     // TODO: implement gbdev/rgbds#1005...
     //#[arg(short = 'U', long)]
-    //pub(super) unit_size: ???,
+    //unit_size: ???,
     /// Permit de-duplication of tiles
     #[arg(short, long)]
-    pub(super) unique_tiles: bool,
+    unique_tiles: bool,
     /// Explain what is being done
     ///
     /// Specify multiple times (up to six) for increasing levels of detail.
     #[arg(short, long, action = clap::ArgAction::Count)]
-    pub(super) verbose: u8,
+    verbose: u8,
     /// Skip emitting the last <nb> tiles' data
-    #[arg(short = 'x', long, default_value_t = 0, value_name = "nb of tiles", value_parser = parse_number::<usize>, hide_default_value = true)]
-    pub(super) trim_end: usize,
+    #[arg(short = 'x', long, default_value_t = 0, value_name = "nb of tiles", value_parser = crate::common::cli::parse_number::<usize>, hide_default_value = true)]
+    trim_end: usize,
     /// Scan the image column by column, instead of row by row
     #[arg(short = 'Z', long)]
-    pub(super) columns: bool,
+    columns: bool,
 
     /// Place files written through `--auto-*` options next to the tile data, instead of the image
     #[arg(help_heading = "Output files", short = 'O', long, requires = "output")]
-    pub(super) group_outputs: bool,
+    group_outputs: bool,
     /// Write a map of GBC tile attributes to <path>
     #[arg(help_heading = "Output files", short, long, value_name = "path")]
-    pub(super) attr_map: Option<PathBuf>,
+    attr_map: Option<PathBuf>,
     /// Write a map of GBC tile attributes to a pre-determined location
     #[arg(
         help_heading = "Output files",
@@ -110,13 +113,13 @@ pub(super) struct Cli {
         long,
         conflicts_with = "attr_map"
     )]
-    pub(super) auto_attr_map: bool,
+    auto_attr_map: bool,
     /// Write tile data to <path>
     #[arg(help_heading = "Output files", short, long, value_name = "path")]
-    pub(super) output: Option<PathBuf>,
+    output: Option<PathBuf>,
     /// Write GBC palettes to <path>
     #[arg(help_heading = "Output files", short, long, value_name = "path")]
-    pub(super) palette: Option<PathBuf>,
+    palette: Option<PathBuf>,
     /// Write GBC palettes to a pre-determined location
     #[arg(
         help_heading = "Output files",
@@ -124,10 +127,10 @@ pub(super) struct Cli {
         long,
         conflicts_with = "palette"
     )]
-    pub(super) auto_palette: bool,
+    auto_palette: bool,
     /// Write a map of palette IDs to <path>
     #[arg(help_heading = "Output files", short = 'q', long, value_name = "path")]
-    pub(super) palette_map: Option<PathBuf>,
+    palette_map: Option<PathBuf>,
     /// Write a map of palette IDs to a pre-determined location
     #[arg(
         help_heading = "Output files",
@@ -135,10 +138,10 @@ pub(super) struct Cli {
         long,
         conflicts_with = "palette_map"
     )]
-    pub(super) auto_palette_map: bool,
+    auto_palette_map: bool,
     /// Write a map of tile IDs to <path>
     #[arg(help_heading = "Output files", short, long, value_name = "path")]
-    pub(super) tilemap: Option<PathBuf>,
+    tilemap: Option<PathBuf>,
     /// Write a map of tile IDs to a pre-determined location
     #[arg(
         help_heading = "Output files",
@@ -146,41 +149,23 @@ pub(super) struct Cli {
         long,
         conflicts_with = "tilemap"
     )]
-    pub(super) auto_tilemap: bool,
+    auto_tilemap: bool,
 
     /// Path to the image to convert
     // TODO: should be required if any auto-path is requested, unless `-O` is set
     #[arg(value_name = "path to image", required_unless_present = "colors")]
-    pub(super) input: Option<PathBuf>,
+    input: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone)]
-pub(super) enum PalSpec {
+enum PalSpec {
     Inline(Vec<Vec<Option<Rgb>>>),
     Embedded,
     External { fmt: String, path: String },
 }
 
-fn parse_number<N: funty::Unsigned>(arg: &str) -> Result<N, std::num::ParseIntError> {
-    if let Some(binary) = arg
-        .strip_prefix('%')
-        .or_else(|| arg.strip_prefix("0b"))
-        .or_else(|| arg.strip_prefix("0B"))
-    {
-        N::from_str_radix(binary, 2)
-    } else if let Some(hexadecimal) = arg
-        .strip_prefix('$')
-        .or_else(|| arg.strip_prefix("0x"))
-        .or_else(|| arg.strip_prefix("0X"))
-    {
-        N::from_str_radix(hexadecimal, 16)
-    } else {
-        N::from_str_radix(arg, 10)
-    }
-}
-
 #[derive(Debug, Clone)]
-pub(super) struct NumList<U: funty::Unsigned, const NB_MAX: usize>(ArrayVec<U, NB_MAX>);
+struct NumList<U: funty::Unsigned, const NB_MAX: usize>(ArrayVec<U, NB_MAX>);
 
 impl<U: funty::Unsigned, T: Into<ArrayVec<U, NB_MAX>>, const NB_MAX: usize> From<T>
     for NumList<U, NB_MAX>
@@ -196,7 +181,7 @@ impl<U: funty::Unsigned, const NB_MAX: usize> FromStr for NumList<U, NB_MAX> {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let mut numbers = ArrayVec::new();
         for (i, item) in s.split(',').enumerate() {
-            let number = parse_number(item)
+            let number = crate::common::cli::parse_number(item)
                 .map_err(|err| format!("the {} number is invalid: {err}", Nth(i + 1)))?;
             numbers.try_push(number).map_err(|_err| {
                 format!("too many numbers, expected {} at most", numbers.capacity())
@@ -240,9 +225,9 @@ impl FromStr for InputSlice {
                 )
             })?;
             Ok((
-                parse_number(left)
+                crate::common::cli::parse_number(left)
                     .map_err(|err| format!("the {} number is invalid: {err}", Nth(idx)))?,
-                parse_number(right)
+                crate::common::cli::parse_number(right)
                     .map_err(|err| format!("the {} number is invalid: {err}", Nth(idx + 1)))?,
             ))
         }

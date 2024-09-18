@@ -1,411 +1,304 @@
-/*
- * This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at https://mozilla.org/MPL/2.0/.
- *
- * SPDX-License-Identifier: MPL-2.0
- */
+use chrono::prelude::*;
+use compact_str::CompactString;
+use rustc_hash::{FxBuildHasher, FxHashMap};
+use string_interner::{backend::StringBackend, symbol::SymbolU32, StringInterner};
 
-use std::{collections::HashMap, rc::Rc};
+use crate::{context_stack::Span, format::FormatSpec, macro_args::MacroArgs};
 
-use rgbds::object::SymbolsProvider;
-use string_interner::{backend::StringBackend, symbol::SymbolU32, StringInterner, Symbol};
+type Symbol = SymbolU32;
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct SymName(Symbol);
+type SymbolNames = StringInterner<StringBackend<Symbol>, FxBuildHasher>;
 
-use crate::{
-    fstack::Fstack,
-    language::{AsmError, AsmErrorKind, Location, SymEvalErrKind},
-    macro_args::MacroArgs,
-    sections::{SectionId, Sections},
-};
-
+// TODO: consider using a `Vec<Option<SymbolData>>` instead of a hash map?
 #[derive(Debug)]
-pub struct Symbols<'fstack> {
-    names: StringInterner<StringBackend<SymbolU32>>,
-    symbols: HashMap<SymbolU32, SymbolData<'fstack>>,
+pub struct Symbols<'ctx_stack> {
+    names: SymbolNames,
+    symbols: FxHashMap<SymName, SymbolData<'ctx_stack>>,
+    scope: Option<SymName>,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct SymbolId(pub u32);
-
-impl<'fstack> Symbols<'fstack> {
-    pub fn new() -> Self {
-        const BUILTINS: &[(&str, SymbolKind)] = &[
-            ("@", SymbolKind::Pc),
-            ("_NARG", SymbolKind::Narg),
-            ("_RS", SymbolKind::Variable(0)),
-        ];
-
-        // Build the name interner and symbol table, starting with builtins.
-        let names: StringInterner = BUILTINS.iter().map(|(name, _)| name).collect();
-        let symbols = BUILTINS
-            .iter()
-            .map(|(name, kind)| {
-                (
-                    names.get(name).unwrap(),
-                    SymbolData {
-                        kind: kind.clone(),
-                        is_builtin: true,
-                        definition: (Location::builtin(), Location::builtin()),
-                        is_referenced: false,
-                    },
-                )
-            })
-            .collect();
-
-        Self { names, symbols }
-    }
-
-    fn def_non_reloc(
-        &mut self,
-        name_begin: Location<'fstack>,
-        name_string: String,
-        name_end: Location<'fstack>,
+#[derive(Debug)]
+pub enum SymbolData<'ctx_stack> {
+    User {
+        definition: Span<'ctx_stack>,
         kind: SymbolKind,
-        allow_redef: bool,
-    ) -> Result<(), AsmError<'fstack>> {
-        let name = self.names.get_or_intern(&name_string);
-        match self.symbols.get_mut(&name) {
-            // The symbol just doesn't exist.
-            None => {
-                self.symbols.insert(
-                    name,
-                    SymbolData {
-                        kind,
-                        is_builtin: false,
-                        definition: (name_begin, name_end),
-                        is_referenced: false,
-                    },
-                );
-                Ok(())
-            }
-            // The symbol was previously created.
-            Some(other) => {
-                // Can the existing symbol be overwritten?
-                // A numeric symbol can overwrite a reference to such,
-                // and we may have been given permission to redefine, but only of the same kind.
-                if (matches!(other.kind, SymbolKind::NumRef) && kind.is_numeric())
-                    || (allow_redef
-                        && std::mem::discriminant(&other.kind) == std::mem::discriminant(&kind))
-                {
-                    debug_assert!(!other.is_builtin);
-                    // Additionally, inherit the "referenced" state.
-                    other.kind = kind;
-                    other.definition = (name_begin, name_end); // Forget about the previous definition.
-                    Ok(())
-                } else {
-                    let other_def_info =
-                        Fstack::make_diag_info(&other.definition.0, Some(&other.definition.1));
-                    Err(AsmError {
-                        begin: name_begin,
-                        end: name_end,
-                        kind: AsmErrorKind::SymAlreadyDefined(name_string, other_def_info),
-                    })
-                }
-            }
-        }
-    }
-
-    pub fn def_constant(
-        &mut self,
-        name_begin: Location<'fstack>,
-        name_string: String,
-        name_end: Location<'fstack>,
-        value: i32,
-        allow_redef: bool,
-    ) -> Result<(), AsmError<'fstack>> {
-        self.def_non_reloc(
-            name_begin,
-            name_string,
-            name_end,
-            SymbolKind::Constant(value),
-            allow_redef,
-        )
-    }
-
-    pub fn def_variable(
-        &mut self,
-        name_begin: Location<'fstack>,
-        name_string: String,
-        name_end: Location<'fstack>,
-        value: i32,
-    ) -> Result<(), AsmError<'fstack>> {
-        self.def_non_reloc(
-            name_begin,
-            name_string,
-            name_end,
-            SymbolKind::Variable(value),
-            true,
-        )
-    }
-
-    pub fn def_string(
-        &mut self,
-        name_begin: Location<'fstack>,
-        name_string: String,
-        name_end: Location<'fstack>,
-        string: Rc<String>,
-    ) -> Result<(), AsmError<'fstack>> {
-        self.def_non_reloc(
-            name_begin,
-            name_string,
-            name_end,
-            SymbolKind::String(string),
-            false,
-        )
-    }
-
-    pub fn def_macro(
-        &mut self,
-        name_begin: Location<'fstack>,
-        name_string: String,
-        name_end: Location<'fstack>,
-        body: Rc<String>,
-    ) -> Result<(), AsmError<'fstack>> {
-        self.def_non_reloc(
-            name_begin,
-            name_string,
-            name_end,
-            SymbolKind::Macro(body),
-            false,
-        )
-    }
-
-    fn get_sym(&self, name_str: &str) -> Option<&SymbolData<'fstack>> {
-        self.names
-            .get(name_str)
-            .and_then(|name| self.symbols.get(&name))
-    }
-
-    fn get_sym_mut(&mut self, name_str: &str) -> Option<&mut SymbolData<'fstack>> {
-        self.names
-            .get(name_str)
-            .and_then(|name| self.symbols.get_mut(&name))
-    }
-
-    pub fn get_number(
-        &self,
-        name_str: &str,
-        macro_args: Option<&MacroArgs>,
-        sections: &Sections,
-    ) -> Result<i32, SymEvalErrKind> {
-        self.get_sym(name_str)
-            .ok_or_else(|| SymEvalErrKind::NoSuchSymbol(name_str.into()))?
-            .get_number(name_str, macro_args, sections)
-    }
-
-    pub fn get_number_from_id(
-        &self,
-        id: SymbolId,
-        macro_args: Option<&MacroArgs>,
-        sections: &Sections,
-    ) -> Result<i32, SymEvalErrKind> {
-        let name = SymbolU32::try_from_usize(id.0.try_into().unwrap()).unwrap();
-        let name_str = self
-            .names
-            .resolve(name)
-            .expect("Generated invalid sym ID in RPN!?");
-        match self.symbols.get(&name) {
-            Some(sym_data) => sym_data.get_number(&name_str, macro_args, sections),
-            None => Err(SymEvalErrKind::NoSuchSymbol(name_str.into())),
-        }
-    }
-
-    pub fn get_mut_number(&mut self, name_str: &str) -> Result<&mut i32, SymEvalErrKind> {
-        self.get_sym_mut(name_str)
-            .ok_or_else(|| SymEvalErrKind::NoSuchSymbol(name_str.into()))?
-            .get_mut_number(name_str)
-    }
-
-    pub fn get_rs(&mut self) -> &mut i32 {
-        self.get_mut_number("_RS")
-            .expect("Built-in symbol _RS somehow got undefined?!?")
-    }
-
-    pub fn get_string(&self, name_str: &str) -> Result<&Rc<String>, AsmErrorKind> {
-        self.get_sym(name_str)
-            .ok_or_else(|| AsmErrorKind::NoSuchSymbol(name_str.into()))?
-            .get_string()
-            .ok_or_else(|| AsmErrorKind::SymNotEqus(name_str.into()))
-    }
-
-    pub fn get_macro(&self, name_str: &str) -> Result<(SymbolU32, &Rc<String>), AsmErrorKind> {
-        let (name, data) = self
-            .names
-            .get(name_str)
-            .and_then(|name| self.symbols.get(&name).map(|data| (name, data)))
-            .ok_or_else(|| AsmErrorKind::NoSuchSymbol(name_str.into()))?;
-        Ok((
-            name,
-            data.get_macro()
-                .ok_or_else(|| AsmErrorKind::SymNotMacro(name_str.into()))?,
-        ))
-    }
-
-    pub fn purge(&mut self, name_str: &str) -> Result<(), AsmErrorKind> {
-        let name = self
-            .names
-            .get(name_str)
-            .ok_or_else(|| AsmErrorKind::NoSuchSymbol(name_str.into()))?;
-        let std::collections::hash_map::Entry::Occupied(entry) = self.symbols.entry(name) else {
-            return Err(AsmErrorKind::NoSuchSymbol(name_str.into()));
-        };
-        let symbol = entry.get();
-        if symbol.is_builtin {
-            Err(AsmErrorKind::PurgingBuiltin(name_str.into()))
-        } else if symbol.is_referenced() {
-            Err(AsmErrorKind::PurgingReferenced(name_str.into()))
-        } else {
-            // TODO: do not keep a reference to the label's name as the label scope, if applicable
-            entry.remove();
-            Ok(())
-        }
-    }
-
-    /// References a symbol in a numeric expression, creating it as an empty "reference" if it doesn't exist.
-    /// On success, returns a unique identifier for that symbol.
-    pub fn add_num_ref(
-        &mut self,
-        name_str: &str,
-        begin: &Location<'fstack>,
-        end: &Location<'fstack>,
-    ) -> Result<SymbolId, SymEvalErrKind> {
-        use std::collections::hash_map::Entry;
-
-        let name = self.names.get_or_intern(name_str);
-        match self.symbols.entry(name) {
-            Entry::Vacant(entry) => {
-                entry.insert(SymbolData {
-                    kind: SymbolKind::NumRef,
-                    is_builtin: false,
-                    definition: (begin.clone(), end.clone()),
-                    is_referenced: true,
-                });
-            }
-            Entry::Occupied(mut entry) => {
-                let symbol = entry.get_mut();
-                if !symbol.kind.is_numeric() {
-                    return Err(SymEvalErrKind::NotNumeric(name_str.into()));
-                }
-                symbol.is_referenced = true;
-            }
-        }
-        Ok(SymbolId(name.to_usize() as u32)) // This cast can't truncate, because the symbol is internally 32-bit.
-    }
-}
-
-impl SymbolsProvider for &'_ Symbols<'_> {
-    // TODO
-}
-
-#[derive(Debug)]
-pub struct SymbolData<'fstack> {
-    kind: SymbolKind,
-    is_builtin: bool,
-    definition: (Location<'fstack>, Location<'fstack>),
-    is_referenced: bool,
-}
-
-#[derive(Debug, Clone)]
-pub enum SymbolKind {
-    Constant(i32),
-    Variable(i32),
-    Label {
-        section: SectionId,
-        offset: u16,
+        exported: bool,
     },
-    /// Empty reference, but only numeric types allow that.
-    NumRef,
-    String(Rc<String>),
-    Macro(Rc<String>),
 
-    // Special symbol types.
+    /// Built-in symbols, but that don't have special behaviour.
+    Builtin(SymbolKind),
+    // These builtins *do* have special behaviour.
     Pc,
     Narg,
+    Dot,
+    DotDot,
+
+    /// Placeholder left over after purging a symbol, to improve error messages.
+    Deleted(Span<'ctx_stack>),
 }
 
-impl SymbolData<'_> {
-    fn get_number(
-        &self,
-        name: &str,
+#[derive(Debug)]
+pub enum SymbolKind {
+    Numeric { value: i32, mutable: bool },
+    String(CompactString),
+    Macro, // TODO
+    Label, // TODO
+    Ref,
+}
+
+impl<'ctx_stack> Symbols<'ctx_stack> {
+    pub fn new() -> Self {
+        let mut this = Self {
+            names: SymbolNames::new(),
+            symbols: FxHashMap::with_hasher(FxBuildHasher),
+            scope: None,
+        };
+
+        let mut def_builtin = |name, kind| {
+            let name_sym = this.names.get_or_intern_static(name);
+            let res = this.symbols.insert(SymName(name_sym), kind);
+            debug_assert!(res.is_none());
+        };
+        let numeric = |value, mutable| SymbolData::Builtin(SymbolKind::Numeric { value, mutable });
+        let string = |string| SymbolData::Builtin(SymbolKind::String(string));
+
+        def_builtin("@", SymbolData::Pc);
+        def_builtin("_NARG", SymbolData::Narg);
+        def_builtin("_RS", numeric(0, true));
+        def_builtin(".", SymbolData::Dot);
+        def_builtin("..", SymbolData::DotDot);
+
+        def_builtin(
+            "__RGBDS_VERSION__",
+            string(CompactString::const_new(crate::common::build::PKG_VERSION)),
+        );
+        def_builtin(
+            "__RGBDS_MAJOR__",
+            numeric(
+                crate::common::build::PKG_VERSION_MAJOR
+                    .parse()
+                    .expect(crate::common::build::PKG_VERSION_MAJOR),
+                false,
+            ),
+        );
+        def_builtin(
+            "__RGBDS_MINOR__",
+            numeric(
+                crate::common::build::PKG_VERSION_MINOR
+                    .parse()
+                    .expect(crate::common::build::PKG_VERSION_MINOR),
+                false,
+            ),
+        );
+        def_builtin(
+            "__RGBDS_PATCH__",
+            numeric(
+                crate::common::build::PKG_VERSION_PATCH
+                    .parse()
+                    .expect(crate::common::build::PKG_VERSION_PATCH),
+                false,
+            ),
+        );
+        // This symbol is only defined for release candidates.
+        if let Some(rc) = crate::common::build::PKG_VERSION_PRE.strip_prefix("-rc") {
+            def_builtin(
+                "__RGBDS_RC__",
+                numeric(
+                    rc.parse().expect(crate::common::build::PKG_VERSION_PRE),
+                    false,
+                ),
+            );
+        }
+
+        let now = chrono::Local::now();
+        let now_utc = now.with_timezone(&chrono::Utc);
+        def_builtin(
+            "__TIME__",
+            string(now.format("\"%H:%M:%S\"").to_string().into()),
+        );
+        def_builtin(
+            "__DATE__",
+            string(now.format("\"%d %B %Y\"").to_string().into()),
+        );
+        def_builtin(
+            "__ISO_8601_LOCAL__",
+            string(
+                now.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+                    .into(),
+            ),
+        );
+        def_builtin(
+            "__ISO_8601_UTC__",
+            string(
+                now_utc
+                    .to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+                    .into(),
+            ),
+        );
+        def_builtin("__UTC_YEAR__", numeric(now_utc.year() as i32, false));
+        def_builtin("__UTC_MONTH__", numeric(now_utc.month() as i32, false));
+        def_builtin("__UTC_DAY__", numeric(now_utc.day() as i32, false));
+        def_builtin("__UTC_HOUR__", numeric(now_utc.hour() as i32, false));
+        def_builtin("__UTC_MINUTE__", numeric(now_utc.minute() as i32, false));
+        def_builtin("__UTC_SECOND__", numeric(now_utc.second() as i32, false));
+
+        this
+    }
+
+    pub fn intern_name<S: AsRef<str>>(&mut self, name: S) -> SymName {
+        SymName(self.names.get_or_intern(name))
+    }
+
+    pub fn get_interned_name<S: AsRef<str>>(&mut self, name: S) -> Option<SymName> {
+        self.names.get(name).map(SymName)
+    }
+
+    pub fn find<S: AsRef<str>>(&mut self, name: S) -> Option<&SymbolData<'_>> {
+        self.names
+            .get(name)
+            .and_then(|sym| self.symbols.get(&SymName(sym)))
+    }
+
+    pub fn find_interned(&self, name: &SymName) -> Option<&SymbolData<'_>> {
+        self.symbols.get(name)
+    }
+
+    pub fn format_as<'sym: 'ctx_stack>(
+        &'sym self,
+        name: Option<SymName>,
+        fmt: &FormatSpec,
+        buf: &mut CompactString,
         macro_args: Option<&MacroArgs>,
-        sections: &Sections<'_>,
-    ) -> Result<i32, SymEvalErrKind> {
-        match &self.kind {
-            SymbolKind::Constant(value) | SymbolKind::Variable(value) => Ok(*value),
-            SymbolKind::Label { section, offset } => todo!(),
-            SymbolKind::Pc => match sections
-                .active_section()
-                .ok_or(SymEvalErrKind::PcOutsideSection)?
-                .try_get_pc()
-            {
-                Some(pc) => Ok(pc.into()),
-                None => Err(SymEvalErrKind::NonConst(name.into())),
-            },
-            SymbolKind::Narg => match macro_args {
-                Some(args) => Ok(args.nb_args().try_into().expect("Macro has too many args!")),
-                None => Err(SymEvalErrKind::NargOutsideMacro),
-            },
-            SymbolKind::NumRef => Err(SymEvalErrKind::NonConst(name.into())),
-            SymbolKind::String(_) | SymbolKind::Macro(_) => {
-                Err(SymEvalErrKind::NotNumeric(name.into()))
+    ) -> Result<(), FormatError<'ctx_stack, 'sym>> {
+        let Some(sym) = name.and_then(|name| self.find_interned(&name)) else {
+            return Err(FormatError::NotFound);
+        };
+        if let Some(value) = sym.get_number(macro_args) {
+            todo!()
+        } else if let Some(s) = sym.get_string() {
+            fmt.write_str(&s, buf);
+        } else if let SymbolData::Deleted(span) = sym {
+            return Err(FormatError::Deleted(span));
+        } else {
+            return Err(FormatError::BadKind);
+        };
+
+        Ok(())
+    }
+
+    fn define_symbol(
+        &mut self,
+        name: SymName,
+        definition: Span<'ctx_stack>,
+        kind: SymbolKind,
+        exported: bool,
+    ) -> Result<(), &mut SymbolData<'ctx_stack>> {
+        use std::collections::hash_map::Entry;
+
+        match self.symbols.entry(name) {
+            Entry::Vacant(entry) => {
+                entry.insert(SymbolData::User {
+                    definition,
+                    kind,
+                    exported,
+                });
+                Ok(())
+            }
+            Entry::Occupied(entry) => {
+                let existing = entry.into_mut();
+                match existing {
+                    // If the entry is merely occupied by a placeholder, just override it.
+                    SymbolData::Deleted(..) => {
+                        *existing = SymbolData::User {
+                            definition,
+                            kind,
+                            exported,
+                        };
+                        Ok(())
+                    }
+                    // Numeric symbols override "references" (themselves essentially placeholders).
+                    SymbolData::User {
+                        kind: SymbolKind::Ref,
+                        exported: previously_exported,
+                        ..
+                    } if matches!(kind, SymbolKind::Label | SymbolKind::Numeric { .. }) => {
+                        // It should be impossible for references to be marked as exported.
+                        // TODO: even when you purge an exported symbol referenced in a link-time expression?
+                        debug_assert!(!*previously_exported);
+
+                        *existing = SymbolData::User {
+                            definition,
+                            kind,
+                            exported,
+                        };
+                        Ok(())
+                    }
+                    _ => Err(existing),
+                }
             }
         }
     }
 
-    fn get_mut_number(&mut self, name: &str) -> Result<&mut i32, SymEvalErrKind> {
-        match &mut self.kind {
-            SymbolKind::Constant(value) | SymbolKind::Variable(value) => Ok(value),
-            SymbolKind::String(_) | SymbolKind::Macro(_) => {
-                Err(SymEvalErrKind::NotNumeric(name.into()))
-            }
-            SymbolKind::Label { .. } | SymbolKind::NumRef | SymbolKind::Pc | SymbolKind::Narg => {
-                Err(SymEvalErrKind::NotMutable(name.into()))
-            }
+    pub fn define_string_interned(
+        &mut self,
+        name: SymName,
+        definition: Span<'ctx_stack>,
+        string: CompactString,
+    ) {
+        if let Err(existing) =
+            self.define_symbol(name, definition, SymbolKind::String(string), false)
+        {
+            todo!()
         }
-    }
-
-    fn get_string(&self) -> Option<&Rc<String>> {
-        match &self.kind {
-            SymbolKind::String(equs) => Some(equs),
-            SymbolKind::Constant(..)
-            | SymbolKind::Variable(..)
-            | SymbolKind::Label { .. }
-            | SymbolKind::NumRef
-            | SymbolKind::Macro(..)
-            | SymbolKind::Pc
-            | SymbolKind::Narg => None,
-        }
-    }
-
-    fn get_macro(&self) -> Option<&Rc<String>> {
-        match &self.kind {
-            SymbolKind::Macro(body) => Some(body),
-            SymbolKind::Constant(..)
-            | SymbolKind::Variable(..)
-            | SymbolKind::Label { .. }
-            | SymbolKind::NumRef
-            | SymbolKind::String(..)
-            | SymbolKind::Pc
-            | SymbolKind::Narg => None,
-        }
-    }
-
-    fn is_referenced(&self) -> bool {
-        self.is_referenced
     }
 }
 
-impl SymbolKind {
-    /// Whether this entry is numeric; in particular, whether it supports overriding a `NumRef`.
-    fn is_numeric(&self) -> bool {
-        matches!(
-            self,
-            Self::Constant(..)
-                | Self::Variable(..)
-                | Self::Label { .. }
-                | Self::NumRef
-                | Self::Pc
-                | Self::Narg
-        )
+pub enum FormatError<'ctx_stack, 'sym> {
+    NotFound,
+    Deleted(&'sym Span<'ctx_stack>),
+    BadKind,
+}
+
+impl<'ctx_stack> SymbolData<'ctx_stack> {
+    pub fn def_span(&self) -> &Span<'ctx_stack> {
+        match self {
+            Self::User { definition, .. } => definition,
+            _ => &Span::BUILTIN,
+        }
+    }
+
+    pub fn get_number(&self, macro_args: Option<&MacroArgs>) -> Option<i32> {
+        match self {
+            Self::User { kind, .. } | Self::Builtin(kind) => match kind {
+                SymbolKind::Numeric { value, .. } => Some(*value),
+                SymbolKind::String(..) => None,
+                SymbolKind::Macro => None,
+                SymbolKind::Label => todo!(),
+                SymbolKind::Ref => None,
+            },
+            Self::Pc => todo!(),
+            Self::Narg => todo!(),
+            Self::Dot => None,
+            Self::DotDot => None,
+            Self::Deleted(..) => None,
+        }
+    }
+
+    pub fn get_string(&self) -> Option<CompactString> {
+        match self {
+            Self::User { kind, .. } | Self::Builtin(kind) => match kind {
+                SymbolKind::Numeric { .. } => None,
+                SymbolKind::String(string) => Some(string.clone()),
+                SymbolKind::Macro => None,
+                SymbolKind::Label => None,
+                SymbolKind::Ref => None,
+            },
+            Self::Pc => None,
+            Self::Narg => None,
+            Self::Dot => todo!(),
+            Self::DotDot => todo!(),
+            Self::Deleted(..) => None,
+        }
     }
 }

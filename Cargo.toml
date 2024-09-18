@@ -2,7 +2,7 @@
 name = "rgbds"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.73" # 1.74 will drop support for older Apple platforms we wish to keep supporting.
+rust-version = "1.73" # 1.74 dropped support for older Apple platforms we wish to keep supporting.
 description = "The premier Game Boy assembly toolchain"
 authors = [ "RGBDS maintainers <rgbds@gbdev.io>" ]
 homepage = "http://rgbds.gbdev.io"
@@ -17,17 +17,17 @@ default = ["rgbasm", "rgblink", "rgbfix", "rgbgfx"]
 
 rgbasm = [
 	# CLI.
-	"dep:clap", "dep:os_info", "dep:codespan-reporting", "dep:shadow-rs", "dep:sysexits",
+	"dep:clap", "dep:os_info", "dep:ariadne", "dep:yansi", "dep:shadow-rs", "dep:sysexits",
 	# Specific deps.
-	"dep:keyword-trie-gen", "dep:lalrpop", "dep:lalrpop-util", "dep:memmap2", "dep:string-interner", "dep:take_mut", "dep:warnings-gen",
+	"dep:chrono", "dep:compact_str", "dep:indexmap", "dep:phf", "dep:rustc-hash", "dep:string-interner", "dep:strum_macros", "dep:uncased",
 ]
 rgblink = [
 	# CLI.
-	"dep:clap", "dep:os_info", "dep:codespan-reporting", "dep:shadow-rs", "dep:sysexits",
+	"dep:clap", "dep:os_info", "dep:ariadne", "dep:yansi", "dep:shadow-rs", "dep:sysexits",
 ]
 rgbfix = [
 	# CLI.
-	"dep:clap", "dep:os_info", "dep:codespan-reporting", "dep:shadow-rs", "dep:sysexits",
+	"dep:clap", "dep:os_info", "dep:ariadne", "dep:yansi", "dep:shadow-rs", "dep:sysexits",
 ]
 rgbgfx = [
 	# CLI.
@@ -36,7 +36,6 @@ rgbgfx = [
 	"dep:arrayvec", "dep:bitvec", "dep:cfg-if", "dep:funty", "dep:plumers",
 ]
 
-# TODO: move bin-only deps to separate features.
 [dependencies] # TODO: audit deps & features
 # TODO: use `thiserror` instead
 parse-display = { version = "0.6", default-features = false }
@@ -48,30 +47,33 @@ ariadne = { version = "0.4", optional = true }
 arrayvec = { version = "0.7", optional = true }
 bitvec = { version = "1.0", optional = true }
 cfg-if = { version = "1.0", optional = true }
+chrono = { version = "0.4.38", optional = true }
 clap = { version = "4.4", features = ["derive", "wrap_help"], optional = true }
-# TODO: switch to `ariadne` instead.
-codespan-reporting = { version = "0.11", optional = true }
+compact_str = { version = "0.8.0", optional = true }
 funty = { version = "2.0", optional = true }
-keyword-trie-gen = { path = "keyword-trie-gen", optional = true }
-lalrpop-util = { version = "0.19.9", optional = true }
-memmap2 = { version = "0.5", optional = true }
+indexmap = { version = "2.5.0", optional = true }
 os_info = { version = "3.8", default-features = false, optional = true }
+phf = { version = "0.11.2", features = ["macros", "uncased"], optional = true }
 plumers = { version = "1.0", optional = true }
+rustc-hash = { version = "2.0.0", optional = true }
 shadow-rs = { version = "0.28", optional = true }
 # TODO: maybe use feature `inline-more`
 string-interner = { version = "0.14", default-features = false, features = ["std", "backends"], optional = true }
+strum_macros = { version = "0.26.4", optional = true }
 sysexits = { version = "0.8", optional = true }
-take_mut = { version = "0.2", optional = true }
-warnings-gen = { path = "warnings-gen", optional = true }
+uncased = { version = "0.9.10", optional = true }
 yansi = { version = "1.0", features = ["detect-env", "detect-tty", "hyperlink"], optional = true }
 
 [build-dependencies]
-lalrpop = { version = "0.19.9", default-features = false, optional = true }
 shadow-rs = { version = "0.28", optional = true }
 
 [dev-dependencies]
 libtest-mimic = "0.7.2"
 snapbox = { version = "0.5.11", features = ["path", "cmd"] }
+
+[patch.crates-io]
+ariadne = { git = "https://github.com/ISSOtm/ariadne.git", branch = "write_refactor" }
+phf = { git = "https://github.com/ISSOtm/rust-phf.git", branch = "uncased" }
 
 [[bin]]
 name = "rgbasm"
@@ -88,11 +90,8 @@ name = "rgbgfx"
 harness = false
 required-features = ["rgbgfx"]
 
-[workspace]
-members = ["keyword-trie-gen", "warnings-gen"]
-
 # The profile that 'cargo dist' will build with
-# NOTE: for extra savings, pass `-Z build-std` to Cargo, and `-Zlocation-deetail=none` to rustc (via RUSTFLAGS or other).
+# NOTE: for extra savings, pass `-Z build-std` to Cargo, and `-Zlocation-detail=none` to rustc (via RUSTFLAGS or other).
 [profile.dist]
 inherits = "release"
 # NOTE: to enable LTO across programming language boundaries, see the "Linker-plugin-based LTO" chapter

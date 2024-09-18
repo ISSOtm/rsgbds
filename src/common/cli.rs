@@ -29,6 +29,24 @@ pub fn setup_and_parse_args<Cli: Parser>() -> Result<Cli, ()> {
     Cli::try_parse_from(args).map_err(|err| err.print().expect("Failed to print CLI error"))
 }
 
+pub fn parse_number<N: funty::Unsigned>(arg: &str) -> Result<N, std::num::ParseIntError> {
+    if let Some(binary) = arg
+        .strip_prefix('%')
+        .or_else(|| arg.strip_prefix("0b"))
+        .or_else(|| arg.strip_prefix("0B"))
+    {
+        N::from_str_radix(binary, 2)
+    } else if let Some(hexadecimal) = arg
+        .strip_prefix('$')
+        .or_else(|| arg.strip_prefix("0x"))
+        .or_else(|| arg.strip_prefix("0X"))
+    {
+        N::from_str_radix(hexadecimal, 16)
+    } else {
+        N::from_str_radix(arg, 10)
+    }
+}
+
 fn setup_panic_handler() {
     let should_override = !cfg!(debug_assertions) && std::env::var_os("RUST_BACKTRACE").is_none();
     if should_override {

@@ -6,87 +6,184 @@
  * SPDX-License-Identifier: MPL-2.0
  */
 
-// FIXME: these drown out more useful warnings during development. Remove them once a MVP is ready.
-#![allow(dead_code, unused_variables, unreachable_code)]
+#![deny(
+    clippy::undocumented_unsafe_blocks,
+    unsafe_op_in_unsafe_fn,
+    unused_unsafe
+)]
+#![debugger_visualizer(gdb_script_file = "../../maintainer/gdb_pretty_printers.py")]
 
-use rgbds::object::generate_object_file;
+use std::{
+    cell::Cell,
+    fs::File,
+    path::{Path, PathBuf},
+};
 
-use std::{cell::RefCell, fs::File, process::ExitCode};
+use compact_str::CompactString;
+use rustc_hash::FxBuildHasher;
+use string_interner::StringInterner;
+use sysexits::ExitCode;
 
-mod error;
-use error::Reporter;
-mod expr;
-mod fstack;
-use fstack::Fstack;
-mod input;
-use input::Storage;
-mod instructions;
-mod language;
-use language::{AsmError, AsmErrorKind, Lexer, Location, Parser, Tokenizer};
+fn main() -> ExitCode {
+    // `Cli::finish()` also calls `crate::common::cli::apply_color_choice`.
+    let (options, input_path, defines, warnings) =
+        match crate::common::cli::setup_and_parse_args().and_then(Cli::finish) {
+            Ok(cli) => cli,
+            Err(()) => return ExitCode::Usage,
+        };
+
+    run(options, input_path, defines)
+        .err()
+        .unwrap_or(ExitCode::Ok)
+}
+
+mod cli;
+use cli::*;
+#[path = "../common/mod.rs"]
+mod common;
+mod context_stack;
+use context_stack::ContextStack;
+mod diagnostics;
+use diagnostics::{WarningLevel, NB_WARNINGS};
+mod format;
+mod lexer;
 mod macro_args;
-mod opt;
-mod sections;
-use opt::RuntimeOptStack;
-use sections::Sections;
+mod parser;
+mod source_store;
+use source_store::{SourceHandle, SourceStore};
 mod symbols;
 use symbols::Symbols;
 
-fn main() -> ExitCode {
-    // TODO: arg parsing
+use crate::context_stack::Span;
+mod tokens;
 
-    // TODO: colour choice
-    let mut reporter = RefCell::new(Reporter::new(
-        codespan_reporting::term::termcolor::ColorChoice::Always,
-    ));
+#[derive(Debug, Clone)]
+pub struct Options {
+    binary_digits: [char; 2],
+    export_all: bool,
+    gfx_chars: [char; 4],
+    inc_paths: Vec<PathBuf>,
+    dependfile: Option<PathBuf>,
+    // TODO: `MG`, `MP`, `MT`, `MQ`
+    output: Option<PathBuf>,
+    preinclude: Option<PathBuf>,
+    pad_value: u8,
+    q_precision: u8,
+    recursion_depth: usize,
+    inhibit_warnings: bool,
+    // TODO: use some bitfield(s) instead?
+    warnings: [WarningLevel; NB_WARNINGS],
+    max_errors: usize,
+}
 
-    let root_path = "/tmp/test.asm"; // TODO
-    let root_file = File::open(root_path).expect("Failed to open root file"); // TODO: also support stdin/stdout
-    let root_file = Storage::from_file(root_path.to_string().into(), &root_file)
-        .expect("Failed to read root file");
-    let runtime_opts = RefCell::new(RuntimeOptStack::new());
-    let fstack = Fstack::new(root_file);
-    let sections = RefCell::new(Sections::new());
-    let symbols = RefCell::new(Symbols::new());
-    let lexer = RefCell::new(Lexer::new());
-    let macro_args = RefCell::new(Vec::new());
+fn run(options: Options, input_path: PathBuf, defines: Vec<String>) -> Result<(), ExitCode> {
+    let mut sources = SourceStore::new();
+    let mut context_stack = ContextStack::new();
+    let remaining_errors = Cell::new(options.max_errors);
 
-    // Note: this method is generated from `parser.lalrpop`!
-    if let Err(error) = Parser::new().parse(
-        &runtime_opts,
-        &fstack,
-        &lexer,
-        &macro_args,
-        &sections,
-        &symbols,
-        &reporter,
-        Tokenizer::new(
-            &runtime_opts,
-            &fstack,
-            &lexer,
-            &macro_args,
-            &reporter,
-            &symbols,
-        ),
-    ) {
-        reporter.get_mut().report_fatal_error(&fstack, error);
-        return ExitCode::FAILURE;
-    };
-
-    let obj_file_path = "/tmp/test.o";
-    let sections = sections.into_inner();
-    let symbols = symbols.into_inner();
-    if let Err(error_kind) =
-        generate_object_file(obj_file_path, fstack.finalize(), &sections, &symbols)
-    {
-        let error = AsmError {
-            begin: Location::builtin(),
-            end: Location::builtin(),
-            kind: AsmErrorKind::ObjFileErr(obj_file_path.into(), error_kind),
-        }
-        .into();
-        reporter.get_mut().report_fatal_error(&fstack, error);
-        return ExitCode::FAILURE;
+    let mut symbols = Symbols::new();
+    for mut define in defines {
+        let (name, value): (_, CompactString) = match define.split_once('=') {
+            Some((name, _value)) => (symbols.intern_name(name), {
+                // Reuse the string's buffer for the `CompactString`.
+                define.drain(..=name.len()); // The extra char is the `=` sign.
+                define.into()
+            }),
+            None => (symbols.intern_name(define), CompactString::const_new("1")),
+        };
+        symbols.define_string_interned(name, Span::COMMAND_LINE, value);
     }
 
-    ExitCode::SUCCESS
+    if let Some(preinc_path) = &options.preinclude {
+        match options.load_file(preinc_path, &mut sources) {
+            Err(err) => diagnostics::error(
+                Span::COMMAND_LINE,
+                |report| report.with_message(format!("Failed to open preinclude file: {err}")),
+                &sources,
+                &remaining_errors,
+                &options,
+            ), // Try to keep going even after this failure.
+            Ok(handle) => {
+                parser::parse_file(
+                    &mut context_stack,
+                    &sources,
+                    handle,
+                    &mut symbols,
+                    &remaining_errors,
+                    &options,
+                );
+            }
+        }
+    }
+
+    let res = if input_path == AsRef::<Path>::as_ref("-") {
+        sources.load_stdin()
+    } else {
+        sources.load_file(&input_path)
+    };
+    let handle = match res {
+        Ok(handle) => handle,
+        Err(err) => {
+            diagnostics::error(
+                Span::COMMAND_LINE,
+                |report| report.with_message(format!("Failed to open input file: {err}")),
+                &sources,
+                &remaining_errors,
+                &options,
+            );
+            return Err(ExitCode::NoInput);
+        }
+    };
+    parser::parse_file(
+        &mut context_stack,
+        &sources,
+        handle,
+        &mut symbols,
+        &remaining_errors,
+        &options,
+    );
+
+    if remaining_errors.get() == options.max_errors {
+        todo!();
+    } else {
+        Err(ExitCode::DataErr)
+    }
+}
+
+impl Options {
+    /// Looks up a file along all defined search paths ("include paths"), and loads it into the
+    /// [`SourceStore`].
+    ///
+    /// # Caveats
+    ///
+    /// Unfortunately, this is vulnerable to a TOCTTOU condition, since the file is opened *after*
+    /// this checking is done, and thus the target could be changed in the meantime.
+    ///
+    /// Ideally, we'd avoid that by attempting to use the `File` and checking that
+    /// `matches!(err.kind(), NotFound | IsADirectory)`, *but* the latter is not stable as of our MSRV.
+    fn load_file(
+        &self,
+        path: &Path,
+        sources: &mut SourceStore,
+    ) -> Result<SourceHandle, std::io::Error> {
+        if path.is_file() {
+            return sources.load_file(path);
+        }
+
+        let mut buf = PathBuf::new();
+        for inc_dir in &self.inc_paths {
+            buf.clear();
+            buf.push(inc_dir);
+            buf.push(path);
+
+            if buf.is_file() {
+                return sources.load_file(&buf);
+            }
+        }
+
+        Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "File not found under any include path",
+        ))
+    }
 }
