@@ -6,8 +6,8 @@ use crate::{context_stack::Span, symbols::SymName};
 
 #[derive(Debug)]
 pub struct Token<'ctx_stack> {
-    pub span: Span<'ctx_stack>,
     pub payload: TokenPayload,
+    pub span: Span<'ctx_stack>,
 }
 
 macro_rules! define_tokens {

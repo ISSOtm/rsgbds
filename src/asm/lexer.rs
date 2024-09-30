@@ -157,8 +157,8 @@ pub fn next_token<'ctx_stack>(
             ($default:expr $(, $extra:pat => $with_extra:expr)+ $(,)?) => {{
                 consume_char(params.src_ctx, ch);
                 match peek(params, true, true) {
-                    $(Some(extra @ $extra) => {
-                        consume_char(params.src_ctx, extra);
+                    $(Some(extra_ @ $extra) => {
+                        consume_char(params.src_ctx, extra_);
                         #[allow(unreachable_code)] // Sometimes, `payload` is a diverging expression. But that's intended!
                         Token {
                             payload: $with_extra,
@@ -174,15 +174,22 @@ pub fn next_token<'ctx_stack>(
         }
 
         match ch {
-            ';' => discard_comment(params),
+            ';' => {
+                discard_comment(params);
+                continue;
+            }
             // TODO: try to discard whitespace in bulk.
             //       We could advance through the buffers/expansions, ignoring leading whitespace.
             //       Such a function would also be useful in other places, I think?
-            chars!(whitespace) => consume_char(params.src_ctx, ch), // Just ignore whitespace.
+            chars!(whitespace) => {
+                consume_char(params.src_ctx, ch);
+                continue;
+            } // Just ignore whitespace.
 
             // Newline.
             '\r' => {
                 handle_crlf(params);
+
                 break Token {
                     span: span(start, loc(params.src_ctx), ctx_stack, &mut sources),
                     payload: tok!("end of line"),
@@ -224,25 +231,55 @@ pub fn next_token<'ctx_stack>(
             ':' => break make!(tok!(":"), ':' => tok!("::"), '-' | '+' => todo!()),
 
             '0'..='9' => {
-                todo!();
+                consume_char(params.src_ctx, ch);
+
+                let number = read_number(params, ch, 10, start);
+                if peek(params, true, true) == Some('.') {
+                    todo!();
+                }
+                break make!(tok!("number")(number));
             }
 
             '&' => {
-                break make!(tok!("&"), '=' => tok!("&="), '&' => tok!("&&"), '0'..='7' => todo!())
+                break make!(tok!("&"), '=' => tok!("&="), '&' => tok!("&&"), ch @ '0'..='7' => tok!("number")(read_number(params, ch, 8, start)));
             }
             '%' => {
                 consume_char(params.src_ctx, '%');
+
                 break Token {
                     payload: match peek(params, true, true) {
                         Some('=') => tok!("%="),
-                        Some(c) if params.options.binary_digits.contains(&c) => todo!(),
+                        Some(c) if params.options.binary_digits.contains(&c) => tok!("number")(
+                            read_dyn_number(params, c, &params.options.binary_digits, start),
+                        ),
                         _ => tok!("%"),
                     },
                     span: span(start, loc(params.src_ctx), ctx_stack, &mut sources),
                 };
             }
-            '$' => todo!(),
-            '`' => todo!(),
+            '$' => {
+                consume_char(params.src_ctx, ch);
+
+                if let Some(first_char) = peek(params, true, true) {
+                    if first_char.is_ascii_hexdigit() {
+                        break make!(tok!("number")(read_number(params, first_char, 16, start)));
+                    }
+                }
+            }
+            '`' => {
+                consume_char(params.src_ctx, ch);
+
+                if let Some(first_char) = peek(params, true, true) {
+                    if params.options.gfx_chars.contains(&first_char) {
+                        break make!(tok!("number")(read_dyn_number(
+                            params,
+                            first_char,
+                            &params.options.gfx_chars,
+                            start
+                        )));
+                    }
+                }
+            }
 
             '"' => todo!(),
 
@@ -252,14 +289,17 @@ pub fn next_token<'ctx_stack>(
 
             '#' => {
                 consume_char(params.src_ctx, '#');
-                break Token {
-                    payload: match peek(params, true, true) {
-                        Some('"') => todo!(),
-                        Some(chars!(starts_ident)) => read_ident(params, true, true),
-                        _ => todo!(),
-                    },
-                    span: span(start, loc(params.src_ctx), ctx_stack, &mut sources),
-                };
+
+                if let Some(payload) = match peek(params, true, true) {
+                    Some('"') => Some(todo!()),
+                    Some(chars!(starts_ident)) => Some(read_ident(params, true, true)),
+                    _ => None,
+                } {
+                    break Token {
+                        payload,
+                        span: span(start, loc(params.src_ctx), ctx_stack, &mut sources),
+                    };
+                }
             }
             chars!(starts_ident) => {
                 break Token {
@@ -268,10 +308,20 @@ pub fn next_token<'ctx_stack>(
                 };
             }
 
-            // TODO: how to handle unexpected characters?
-            //       Discard until the next stand-alone punctuation (e.g. comma) or whitespace?
-            _ => todo!(),
+            _ => consume_char(params.src_ctx, ch),
         }
+
+        // This point is only reached by invalid characters.
+        // TODO: how to recover from these?
+        //       Discard until the next stand-alone punctuation (e.g. comma) or whitespace?
+        //       Currently, each bad character generates an individual diagnostic, which gets floody quickly.
+        params.error(start, |error, span| {
+            error.with_message("Unexpected character").with_label(
+                diagnostics::error_label(span).with_message(
+                    "This does not belong to any of the tokens expected at this point",
+                ),
+            )
+        });
     })
 }
 
@@ -287,6 +337,103 @@ fn discard_comment(params: &mut LexParams<'_, '_, '_, '_, '_, '_>) {
             Some(c) => ch = c,
         }
     }
+}
+
+fn read_number(
+    params: &mut LexParams<'_, '_, '_, '_, '_, '_>,
+    first_char: char,
+    radix: u32,
+    start: (NonZeroUsize, usize),
+) -> i32 {
+    let mut number = Some(first_char.to_digit(radix).unwrap()); // Should be checked by the caller.
+    while let Some(mut ch) = peek(params, true, true) {
+        if ch == '_' {
+            let underscore_start = loc(params.src_ctx);
+            consume_char(params.src_ctx, ch);
+            match peek(params, true, true) {
+                Some(next) if next.is_digit(radix) => ch = next,
+                _ => {
+                    params.error(underscore_start, |error, span| {
+                        error
+                            .with_message("Trailing underscore in number literal")
+                            .with_label(
+                                diagnostics::error_label(span)
+                                    .with_message("Expected a digit after this `_`"),
+                            )
+                    });
+                    break;
+                }
+            }
+        }
+
+        if let Some(digit) = ch.to_digit(radix) {
+            consume_char(params.src_ctx, ch);
+            number = number
+                .and_then(|num| num.checked_mul(radix))
+                .and_then(|num| num.checked_add(digit));
+        } else {
+            break;
+        }
+    }
+    make_number_token(params, number, start)
+}
+
+fn read_dyn_number(
+    params: &mut LexParams<'_, '_, '_, '_, '_, '_>,
+    first_char: char,
+    digits: &[char],
+    start: (NonZeroUsize, usize),
+) -> i32 {
+    let to_digit = |ch| digits.iter().position(|&c| c == ch).map(|idx| idx as u32);
+
+    let mut number = Some(to_digit(first_char).unwrap()); // Should be checked by the caller.
+    while let Some(mut ch) = peek(params, true, true) {
+        if ch == '_' {
+            let underscore_start = loc(params.src_ctx);
+            consume_char(params.src_ctx, ch);
+            match peek(params, true, true) {
+                Some(next) if to_digit(next).is_some() => ch = next,
+                _ => {
+                    params.error(underscore_start, |error, span| {
+                        error
+                            .with_message("Trailing underscore in number literal")
+                            .with_label(
+                                diagnostics::error_label(span)
+                                    .with_message("Expected a digit after this `_`"),
+                            )
+                    });
+                    break;
+                }
+            }
+        }
+
+        if let Some(digit) = to_digit(ch) {
+            consume_char(params.src_ctx, ch);
+            number = number
+                .and_then(|num| num.checked_mul(digits.len() as u32))
+                .and_then(|num| num.checked_add(digit));
+        } else {
+            break;
+        }
+    }
+    make_number_token(params, number, start)
+}
+
+fn make_number_token(
+    params: &mut LexParams<'_, '_, '_, '_, '_, '_>,
+    number: Option<u32>,
+    start: (NonZeroUsize, usize),
+) -> i32 {
+    number.unwrap_or_else(|| {
+        params.error(start, |error, span| {
+            error
+                .with_message("Number literals are only supported up to 4_294_967_295")
+                .with_label(
+                    diagnostics::error_label(span).with_message("This number literal is too large"),
+                )
+        });
+        u32::MAX // Saturate.
+    }) as i32
 }
 
 fn read_ident(
