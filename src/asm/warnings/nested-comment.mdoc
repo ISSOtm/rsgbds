@@ -2,4 +2,6 @@
 Warn when the block comment start sequence
 .Ql /*
 is found inside of a block comment.
-This typically indicates that the enclosing block comment is not terminated.
+Since block comments cannot be nested, the first
+.Ql */
+will end the whole comment.

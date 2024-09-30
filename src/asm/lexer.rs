@@ -210,8 +210,12 @@ pub fn next_token<'ctx_stack>(
             // 1- or 2-char tokens.
             '+' => break make!(tok!("+"), '=' => tok!("+=")),
             '-' => break make!(tok!("-"), '=' => tok!("-=")),
-            '*' => break make!(tok!("*"), '=' => tok!("*="), '*' => tok!("**")),
-            '/' => break make!(tok!("/"), '=' => tok!("/="), '/' => todo!()),
+            '*' => {
+                break make!(tok!("*"), '=' => tok!("*="), '*' => tok!("**"), '/' => { error_block_comment_term(params, start); continue; });
+            }
+            '/' => {
+                break make!(tok!("/"), '=' => tok!("/="), '*' => { discard_block_comment(params, start); continue; });
+            }
             '|' => break make!(tok!("|"), '=' => tok!("|="), '|' => tok!("||")),
             '^' => break make!(tok!("^"), '=' => tok!("^=")),
             '=' => break make!(tok!("="), '=' => tok!("==")),
@@ -338,6 +342,69 @@ fn discard_comment(params: &mut LexParams<'_, '_, '_, '_, '_, '_>) {
             Some(c) => ch = c,
         }
     }
+}
+
+fn discard_block_comment(
+    params: &mut LexParams<'_, '_, '_, '_, '_, '_>,
+    start: (NonZeroUsize, usize),
+) {
+    let start_marker_end = params.src_ctx.lexer_state().cursor;
+    loop {
+        match peek(params, false, false) {
+            None => {
+                params.error_at(start.1..start_marker_end, |error, span| {
+                    error.with_message("Unterminated block comment").with_label(
+                        diagnostics::error_label(span).with_message("The comment starts here"),
+                    )
+                });
+                break;
+            }
+            Some('*') => {
+                consume_char(params.src_ctx, '*');
+                if let Some(ch) = peek(params, false, false) {
+                    consume_char(params.src_ctx, ch);
+                    if ch == '/' {
+                        break; // Matched `*/`!
+                    }
+                }
+            }
+            Some('/') => {
+                let marker_start = params.src_ctx.lexer_state().cursor;
+                consume_char(params.src_ctx, '/');
+                if let Some(ch) = peek(params, false, false) {
+                    consume_char(params.src_ctx, ch);
+                    if ch == '*' {
+                        params.warning_at(
+                            marker_start..params.src_ctx.lexer_state().cursor,
+                            |warning, span| {
+                                let source_handle = span.0.clone();
+                                warning
+                                    .with_message("Block comment opening marker found inside of a block comment")
+                                    .with_labels([
+                                        diagnostics::warning_label(span)
+                                            .with_message("This opening marker..."),
+                                        diagnostics::warning_label((source_handle, start.1..start_marker_end))
+                                            .with_message("...is inside of the block comment opened here"),
+                                    ])
+                            }
+                        );
+                    }
+                }
+            }
+            Some(ch) => consume_char(params.src_ctx, ch),
+        }
+    }
+}
+
+fn error_block_comment_term(
+    params: &mut LexParams<'_, '_, '_, '_, '_, '_>,
+    start: (NonZeroUsize, usize),
+) {
+    params.error(start, |error, span| {
+        error
+            .with_message("Found a block comment's end marker outside of a block comment")
+            .with_label(diagnostics::error_label(span))
+    });
 }
 
 fn read_number(
@@ -748,19 +815,44 @@ fn span<'ctx_stack>(
     }
 }
 impl LexParams<'_, '_, '_, '_, '_, '_> {
+    fn error_at<F: FnOnce(ReportBuilder, (SourceHandle, Range<usize>)) -> ReportBuilder>(
+        &self,
+        byte_range: Range<usize>,
+        build: F,
+    ) {
+        diagnostics::lex_error(
+            self.node,
+            &byte_range,
+            build,
+            self.source_store,
+            self.nb_errors_remaining,
+            self.options,
+        );
+    }
+
     fn error<F: FnOnce(ReportBuilder, (SourceHandle, Range<usize>)) -> ReportBuilder>(
         &self,
         start: (NonZeroUsize, usize),
         build: F,
     ) {
         let end = self.src_ctx.lexer_state().cursor;
-        diagnostics::lex_error(
-            self.node,
-            &(start.1..end),
-            build,
-            self.source_store,
-            self.nb_errors_remaining,
-            self.options,
-        );
+        self.error_at(start.1..end, build);
+    }
+
+    fn warning_at<F: FnOnce(ReportBuilder, (SourceHandle, Range<usize>)) -> ReportBuilder>(
+        &self,
+        byte_range: Range<usize>,
+        build: F,
+    ) {
+        todo!();
+    }
+
+    fn warning<F: FnOnce(ReportBuilder, (SourceHandle, Range<usize>)) -> ReportBuilder>(
+        &self,
+        start: (NonZeroUsize, usize),
+        build: F,
+    ) {
+        let end = self.src_ctx.lexer_state().cursor;
+        self.warning_at(start.1..end, build);
     }
 }
