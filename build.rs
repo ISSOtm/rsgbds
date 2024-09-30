@@ -57,7 +57,8 @@ fn generate_warnings_mod() {
 
     writeln!(
         &mut file,
-        "pub struct WarningKind(usize);
+        "#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct WarningKind(#[doc(hidden)] pub usize);
 pub const NB_WARNINGS: usize = {};
 
 const DEFAULT_WARNINGS: [bool; NB_WARNINGS] = [",
@@ -93,7 +94,7 @@ const DEFAULT_WARNINGS: [bool; NB_WARNINGS] = [",
         &mut file,
         "];
 
-macro_rules! warn {{"
+macro_rules! warning {{"
     )
     .unwrap();
     let mut i = 0;
@@ -102,7 +103,7 @@ macro_rules! warn {{"
             WarningKind::Boolean { .. } => {
                 writeln!(
                     &mut file,
-                    "    (\"{}\") => {{ WarningKind({i}) }};",
+                    "    (\"{}\") => {{ $crate::diagnostics::WarningKind({i}) }};",
                     &warning.name
                 )
                 .unwrap();
@@ -112,7 +113,7 @@ macro_rules! warn {{"
                 for level in 1..=nb_levels {
                     writeln!(
                         &mut file,
-                        "    (\"{}={level}\") => {{ WarningKind({i}) }};",
+                        "    (\"{}={level}\") => {{ $crate::diagnostics::WarningKind({i}) }};",
                         &warning.name
                     )
                     .unwrap();
@@ -121,7 +122,49 @@ macro_rules! warn {{"
             }
         }
     }
-    writeln!(&mut file, "}}").unwrap();
+    writeln!(
+        &mut file,
+        "}}
+pub(crate) use warning;
+
+impl std::fmt::Display for WarningKind {{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {{
+        f.write_str(match *self {{"
+    )
+    .unwrap();
+    let mut i = 0;
+    for warning in &warnings {
+        match warning.kind {
+            WarningKind::Boolean { .. } => {
+                writeln!(
+                    &mut file,
+                    "            WarningKind({i}) => \"-W{}\",",
+                    &warning.name
+                )
+                .unwrap();
+                i += 1;
+            }
+            WarningKind::Parametric { nb_levels, .. } => {
+                for level in 1..=nb_levels {
+                    writeln!(
+                        &mut file,
+                        "            WarningKind({i}) => \"-W{}={level}\",",
+                        &warning.name
+                    )
+                    .unwrap();
+                    i += 1;
+                }
+            }
+        }
+    }
+    writeln!(
+        &mut file,
+        "            WarningKind(_) => unreachable!(),
+        }})
+    }}
+}}"
+    )
+    .unwrap();
 }
 
 fn parse_all_warnings() -> Vec<Warning> {

@@ -16,8 +16,8 @@ The extra boilerplate is counter-balanced by how much the aforementioned workaro
 use std::cell::Cell;
 
 use crate::{
-    context_stack::ContextStack,
-    lexer,
+    context_stack::{ContextStack, Span},
+    diagnostics, lexer,
     source_store::{SourceHandle, SourceStore},
     symbols::Symbols,
     Options,
@@ -43,4 +43,17 @@ pub fn parse_file(
         // (This will make REPT/FOR loop if possible, and pop everything else.)
         ctx_stack.sources_mut().end_current_context();
     }
+
+    diagnostics::warn(
+        diagnostics::warning!("user"),
+        Span::BUILTIN,
+        |warning| {
+            warning
+                .with_message("Test")
+                .with_label(diagnostics::warning_label(Span::BUILTIN.resolve()))
+        },
+        sources,
+        nb_errors_remaining,
+        options,
+    );
 }

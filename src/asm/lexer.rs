@@ -149,6 +149,7 @@ pub fn next_token<'ctx_stack>(
         macro_rules! make {
             ($kind:expr) => {{
                 consume_char(params.src_ctx, ch);
+                // Since there is no need to dispatch, don't bother `peek`ing.
                 Token {
                     payload: $kind,
                     span: span(start, loc(params.src_ctx), ctx_stack, &mut sources),

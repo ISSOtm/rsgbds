@@ -101,11 +101,11 @@ pub fn warn<F: FnOnce(ReportBuilder) -> ReportBuilder>(
         return;
     }
 
-    // TODO: check that the warning flag is enabled; possibly promote to error...
     let (src_id, byte_range) = span.resolve();
     build(
         Report::build(kind, src_id, byte_range.start)
-            .with_config(Config::new().with_index_type(IndexType::Byte)), //.with_code(id),
+            .with_config(Config::new().with_index_type(IndexType::Byte))
+            .with_code(id),
     )
     .finish()
     .eprint(sources)
