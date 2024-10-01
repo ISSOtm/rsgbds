@@ -286,7 +286,7 @@ pub fn next_token<'ctx_stack>(
                 }
             }
 
-            '"' => todo!(),
+            '"' => break make!(read_string(params, start, false)),
 
             // Macro args were dealt with by `peek`, so if we still see one at this stage,
             // the only valid possibility is a line continuation.
@@ -296,7 +296,7 @@ pub fn next_token<'ctx_stack>(
                 consume_char(params.src_ctx, '#');
 
                 if let Some(payload) = match peek(params, true, true) {
-                    Some('"') => Some(todo!()),
+                    Some('"') => Some(read_string(params, start, true)),
                     Some(chars!(starts_ident)) => Some(read_ident(params, true, true)),
                     _ => None,
                 } {
@@ -361,8 +361,10 @@ fn discard_block_comment(
             }
             Some('*') => {
                 consume_char(params.src_ctx, '*');
+
                 if let Some(ch) = peek(params, false, false) {
                     consume_char(params.src_ctx, ch);
+
                     if ch == '/' {
                         break; // Matched `*/`!
                     }
@@ -371,13 +373,15 @@ fn discard_block_comment(
             Some('/') => {
                 let marker_start = params.src_ctx.lexer_state().cursor;
                 consume_char(params.src_ctx, '/');
+
                 if let Some(ch) = peek(params, false, false) {
                     consume_char(params.src_ctx, ch);
+
                     if ch == '*' {
                         params.warning_at(
                             marker_start..params.src_ctx.lexer_state().cursor,
                             |warning, span| {
-                                let source_handle = span.0.clone();
+                                let source_handle = span.0;
                                 warning
                                     .with_message("Block comment opening marker found inside of a block comment")
                                     .with_labels([
@@ -386,7 +390,7 @@ fn discard_block_comment(
                                         diagnostics::warning_label((source_handle, start.1..start_marker_end))
                                             .with_message("...is inside of the block comment opened here"),
                                     ])
-                            }
+                            },
                         );
                     }
                 }
@@ -502,6 +506,88 @@ fn make_number_token(
         });
         u32::MAX // Saturate.
     }) as i32
+}
+
+fn read_string(
+    params: &mut LexParams<'_, '_, '_, '_, '_, '_>,
+    start: (NonZeroUsize, usize),
+    is_raw: bool,
+) -> TokenPayload {
+    // We reach this function after reading a single double-quote, but possibly there might be two more,
+    // which would start a multiline string.
+    let multiline = if let Some('"') = peek(params, false, false) {
+        consume_char(params.src_ctx, '"');
+        if let Some('"') = peek(params, false, false) {
+            consume_char(params.src_ctx, '"');
+            true
+        } else {
+            // Two consecutive quotes just mean an empty string.
+            return tok!("string")(CompactString::default());
+        }
+    } else {
+        false
+    };
+    let open_marker_end = params.src_ctx.lexer_state().cursor;
+
+    let mut string = CompactString::default();
+    loop {
+        let Some(ch) = peek(params, false, false).and_then(|ch| {
+            if !multiline && matches!(ch, chars!(newline)) {
+                None
+            } else {
+                Some(ch)
+            }
+        }) else {
+            params.error_at(start.1..open_marker_end, |error, span| {
+                error.with_message("Unterminated string").with_label(
+                    diagnostics::error_label(span).with_message("The string starts here"),
+                )
+            });
+            break;
+        };
+
+        match ch {
+            '\r' => {
+                // Note: this is only possible for multiline strings.
+                consume_char(params.src_ctx, '\r');
+                handle_crlf(params);
+                string.push('\n'); // For platform independency, only push LF even if CRLF.
+            }
+            '"' => {
+                consume_char(params.src_ctx, '"');
+
+                if !multiline {
+                    break;
+                }
+                // Multi-line strings need three quotes to be terminated.
+                if peek(params, false, false) == Some('"') {
+                    // Two quotes...
+                    consume_char(params.src_ctx, '"');
+                    if peek(params, false, false) == Some('"') {
+                        // Three!
+                        consume_char(params.src_ctx, '"');
+                        break;
+                    }
+                    string.push('"');
+                }
+                string.push('"');
+            }
+            '\\' if !is_raw => {
+                // Escape character, or macro argument.
+                todo!()
+            }
+            '{' if !is_raw => {
+                // Interpolation.
+                todo!()
+            }
+            ch => {
+                consume_char(params.src_ctx, ch);
+                string.push(ch);
+            }
+        }
+    }
+
+    tok!("string")(string)
 }
 
 fn read_ident(
