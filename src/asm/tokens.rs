@@ -52,7 +52,7 @@ define_tokens! {
         #[name = "identifier"]
         Identifier(SymName),
         #[name = "anonymous label reference"]
-        AnonLabelRef(()), // TODO
+        AnonLabelRef(i32),
         #[name = "end of line"]
         Newline,
 

@@ -233,7 +233,9 @@ pub fn next_token<'ctx_stack>(
                     )
                 )
             }
-            ':' => break make!(tok!(":"), ':' => tok!("::"), '-' | '+' => todo!()),
+            ':' => {
+                break make!(tok!(":"), ':' => tok!("::"), first_char @ ('-' | '+') => read_anon_label_ref(params, first_char))
+            }
 
             '0'..='9' => {
                 consume_char(params.src_ctx, ch);
@@ -409,6 +411,19 @@ fn error_block_comment_term(
             .with_message("Found a block comment's end marker outside of a block comment")
             .with_label(diagnostics::error_label(span))
     });
+}
+
+fn read_anon_label_ref(
+    params: &mut LexParams<'_, '_, '_, '_, '_, '_>,
+    first_char: char,
+) -> TokenPayload {
+    let mut ofs = 1; // We already read the first char.
+    while peek(params, true, true) == Some(first_char) {
+        consume_char(params.src_ctx, first_char);
+        ofs += 1;
+    }
+
+    tok!("anonymous label reference")(if first_char == '+' { ofs } else { -ofs })
 }
 
 fn read_number(
