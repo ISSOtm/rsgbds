@@ -15,13 +15,10 @@
 
 use std::{
     cell::Cell,
-    fs::File,
     path::{Path, PathBuf},
 };
 
 use compact_str::CompactString;
-use rustc_hash::FxBuildHasher;
-use string_interner::StringInterner;
 use sysexits::ExitCode;
 
 fn main() -> ExitCode {
@@ -39,23 +36,20 @@ fn main() -> ExitCode {
 
 mod cli;
 use cli::*;
+#[allow(dead_code)] // rgbasm doesn't use `dash_stdio`.
 #[path = "../common/mod.rs"]
 mod common;
 mod context_stack;
-use context_stack::ContextStack;
+use context_stack::{ContextStack, Span};
 mod diagnostics;
 use diagnostics::{WarningLevel, NB_WARNINGS};
 mod format;
-mod lexer;
 mod macro_args;
-mod parser;
 mod source_store;
 use source_store::{SourceHandle, SourceStore};
 mod symbols;
 use symbols::Symbols;
-
-use crate::context_stack::Span;
-mod tokens;
+mod syntax;
 
 #[derive(Debug, Clone)]
 pub struct Options {
@@ -104,7 +98,7 @@ fn run(options: Options, input_path: PathBuf, defines: Vec<String>) -> Result<()
                 &options,
             ), // Try to keep going even after this failure.
             Ok(handle) => {
-                parser::parse_file(
+                syntax::parser::parse_file(
                     &mut context_stack,
                     &sources,
                     handle,
@@ -134,7 +128,7 @@ fn run(options: Options, input_path: PathBuf, defines: Vec<String>) -> Result<()
             return Err(ExitCode::NoInput);
         }
     };
-    parser::parse_file(
+    syntax::parser::parse_file(
         &mut context_stack,
         &sources,
         handle,

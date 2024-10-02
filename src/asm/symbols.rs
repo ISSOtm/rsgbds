@@ -136,7 +136,7 @@ impl<'ctx_stack> Symbols<'ctx_stack> {
                     .into(),
             ),
         );
-        def_builtin("__UTC_YEAR__", numeric(now_utc.year() as i32, false));
+        def_builtin("__UTC_YEAR__", numeric(now_utc.year(), false));
         def_builtin("__UTC_MONTH__", numeric(now_utc.month() as i32, false));
         def_builtin("__UTC_DAY__", numeric(now_utc.day() as i32, false));
         def_builtin("__UTC_HOUR__", numeric(now_utc.hour() as i32, false));

@@ -15,7 +15,6 @@ TODO: describe the "char stream" / remainder split more
 
 use std::{cell::Cell, num::NonZeroUsize, ops::Range};
 
-use ariadne::Label;
 use compact_str::CompactString;
 use uncased::UncasedStr;
 
@@ -25,7 +24,7 @@ use crate::{
     format::FormatSpec,
     source_store::{ReportBuilder, SourceHandle, SourceStore},
     symbols::Symbols,
-    tokens::{tok, Token, TokenPayload, KEYWORDS},
+    syntax::tokens::{tok, Token, TokenPayload, KEYWORDS},
     Options,
 };
 

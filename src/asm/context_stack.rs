@@ -1,7 +1,7 @@
 use std::{
     cell::RefCell,
     num::NonZeroUsize,
-    ops::{Deref, DerefMut, Index, IndexMut, Range, RangeBounds},
+    ops::{Deref, DerefMut, Index, IndexMut, Range},
     rc::Rc,
 };
 
@@ -9,9 +9,9 @@ use compact_str::CompactString;
 use string_interner::symbol::SymbolUsize;
 
 use crate::{
-    lexer::LexerState,
     macro_args::MacroArgs,
     source_store::{SourceHandle, SourceStore},
+    syntax::lexer::LexerState,
 };
 
 // TODO: can we use something from crate `qcell` instead of `RefCell`?

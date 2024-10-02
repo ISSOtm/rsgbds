@@ -17,9 +17,10 @@ use std::cell::Cell;
 
 use crate::{
     context_stack::{ContextStack, Span},
-    diagnostics, lexer,
+    diagnostics,
     source_store::{SourceHandle, SourceStore},
     symbols::Symbols,
+    syntax::lexer,
     Options,
 };
 
