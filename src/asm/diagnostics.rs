@@ -13,7 +13,7 @@ const ERROR_COLOR: Color = Color::Red;
 pub const ERROR_KIND: ReportKind = ReportKind::Custom("error", ERROR_COLOR);
 
 pub fn error<F: FnOnce(ReportBuilder) -> ReportBuilder>(
-    span: Span<'_>,
+    span: &Span<'_>,
     build: F,
     sources: &SourceStore,
     nb_errors_left: &Cell<usize>,
@@ -80,7 +80,7 @@ pub const WARNING_KIND: ReportKind = ReportKind::Custom("warning", WARNING_COLOR
 // TODO: need also to give me a warning flag!
 pub fn warn<F: FnOnce(ReportBuilder) -> ReportBuilder>(
     id: WarningKind,
-    span: Span<'_>,
+    span: &Span<'_>,
     build: F,
     sources: &SourceStore,
     nb_errors_left: &Cell<usize>,

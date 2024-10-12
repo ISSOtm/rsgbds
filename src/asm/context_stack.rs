@@ -10,7 +10,7 @@ use string_interner::symbol::SymbolUsize;
 
 use crate::{
     macro_args::MacroArgs,
-    source_store::{SourceHandle, SourceStore},
+    source_store::{SourceHandle, SourceSlice, SourceStore},
     syntax::lexer::LexerState,
 };
 
@@ -263,21 +263,66 @@ impl SourcesMut<'_> {
             .map(|contexts| (contexts, nodes.as_slice()))
     }
 
-    pub fn push_file_context(&mut self, source: SourceHandle) {
-        let parent_id = self.active_context().map(|ctx| ctx.source_id);
+    fn push_context(
+        &mut self,
+        node_kind: SourceKind,
+        has_new_unique_id: bool,
+        macro_args: Option<Rc<MacroArgs>>,
+    ) {
+        let context = self.active_context();
+        let unique_id_str = if has_new_unique_id {
+            Some(CompactString::default())
+        } else {
+            context.and_then(|ctx| ctx.unique_id_str.clone())
+        };
+        let macro_args = macro_args.or_else(|| {
+            if let Some(SourceContext {
+                macro_args: Some(args),
+                ..
+            }) = context
+            {
+                Some(Rc::clone(args))
+            } else {
+                None
+            }
+        });
+
+        let parent_id = context.map(|ctx| ctx.source_id); // TODO: increment its ref count
         self.0.nodes.push(SourceNode {
-            ref_count: 1, // Implicitly referenced by the context that is about to be created.
+            ref_count: 1, // Implicitly referenced due to being the active node.
             parent_id,
-            kind: SourceKind::File(source),
+            kind: node_kind,
         });
         let source_id = NonZeroUsize::new(self.0.nodes.len()).unwrap();
 
         self.0.contexts.push(SourceContext {
             source_id,
             lexer_state: LexerState::new(),
-            unique_id_str: None,
-            macro_args: None,
-        })
+            unique_id_str,
+            macro_args,
+        });
+    }
+
+    pub fn push_file_context(&mut self, source: SourceHandle) {
+        self.push_context(SourceKind::File(source), false, None);
+    }
+
+    pub fn push_macro_context(
+        &mut self,
+        name: CompactString,
+        slice: &SourceSlice,
+        args: Rc<MacroArgs>,
+    ) {
+        let (file, slice) = slice.as_raw();
+        self.push_context(
+            SourceKind::Macro {
+                name,
+                file: *file,
+                slice: slice.clone(),
+            },
+            true,
+            Some(args),
+        );
     }
 
     pub fn end_current_context(&mut self) {

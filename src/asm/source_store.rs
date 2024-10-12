@@ -27,6 +27,12 @@ pub struct Source {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SourceHandle(usize);
 
+#[derive(Debug, Clone)]
+pub struct SourceSlice {
+    handle: SourceHandle,
+    bytes: Range<usize>,
+}
+
 impl SourceStore {
     pub fn new() -> Self {
         Self(Vec::new())
@@ -87,6 +93,12 @@ impl Source {
 impl AsRef<str> for Source {
     fn as_ref(&self) -> &str {
         self.contents.text()
+    }
+}
+
+impl SourceSlice {
+    pub fn as_raw(&self) -> (&SourceHandle, &Range<usize>) {
+        (&self.handle, &self.bytes)
     }
 }
 

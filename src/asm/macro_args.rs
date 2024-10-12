@@ -8,6 +8,15 @@ pub struct MacroArgs {
     shift: Cell<usize>,
 }
 
+impl MacroArgs {
+    pub fn new(args: Vec<CompactString>) -> Self {
+        Self {
+            args,
+            shift: Cell::new(0),
+        }
+    }
+}
+
 impl AsRef<[CompactString]> for MacroArgs {
     fn as_ref(&self) -> &[CompactString] {
         &self.args[self.shift.get()..]

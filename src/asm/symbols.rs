@@ -3,7 +3,10 @@ use compact_str::CompactString;
 use rustc_hash::{FxBuildHasher, FxHashMap};
 use string_interner::{backend::StringBackend, symbol::SymbolU32, StringInterner};
 
-use crate::{context_stack::Span, format::FormatSpec, macro_args::MacroArgs};
+use crate::{
+    context_stack::Span, diagnostics, format::FormatSpec, macro_args::MacroArgs,
+    source_store::SourceSlice,
+};
 
 type Symbol = SymbolU32;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -42,7 +45,7 @@ pub enum SymbolData<'ctx_stack> {
 pub enum SymbolKind {
     Numeric { value: i32, mutable: bool },
     String(CompactString),
-    Macro, // TODO
+    Macro(SourceSlice),
     Label, // TODO
     Ref,
 }
@@ -154,10 +157,25 @@ impl<'ctx_stack> Symbols<'ctx_stack> {
         self.names.get(name).map(SymName)
     }
 
-    pub fn find<S: AsRef<str>>(&mut self, name: S) -> Option<&SymbolData<'_>> {
+    pub fn resolve(&self, name: SymName) -> &str {
+        self.names.resolve(name.0).unwrap()
+    }
+
+    fn find<S: AsRef<str>>(&mut self, name: S) -> Option<&SymbolData<'_>> {
         self.names
             .get(name)
             .and_then(|sym| self.symbols.get(&SymName(sym)))
+    }
+
+    pub fn find_macro_interned(&self, name: &SymName) -> Option<Result<&SourceSlice, &SymbolData>> {
+        match self.symbols.get(name) {
+            Some(SymbolData::User {
+                kind: SymbolKind::Macro(slice),
+                ..
+            }) => Some(Ok(slice)),
+            None => None,
+            Some(sym) => Some(Err(sym)),
+        }
     }
 
     pub fn find_interned(&self, name: &SymName) -> Option<&SymbolData<'_>> {
@@ -273,7 +291,7 @@ impl<'ctx_stack> SymbolData<'ctx_stack> {
             Self::User { kind, .. } | Self::Builtin(kind) => match kind {
                 SymbolKind::Numeric { value, .. } => Some(*value),
                 SymbolKind::String(..) => None,
-                SymbolKind::Macro => None,
+                SymbolKind::Macro(_) => None,
                 SymbolKind::Label => todo!(),
                 SymbolKind::Ref => None,
             },
@@ -290,7 +308,7 @@ impl<'ctx_stack> SymbolData<'ctx_stack> {
             Self::User { kind, .. } | Self::Builtin(kind) => match kind {
                 SymbolKind::Numeric { .. } => None,
                 SymbolKind::String(string) => Some(string.clone()),
-                SymbolKind::Macro => None,
+                SymbolKind::Macro(_) => None,
                 SymbolKind::Label => None,
                 SymbolKind::Ref => None,
             },

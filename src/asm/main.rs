@@ -91,7 +91,7 @@ fn run(options: Options, input_path: PathBuf, defines: Vec<String>) -> Result<()
     if let Some(preinc_path) = &options.preinclude {
         match options.load_file(preinc_path, &mut sources) {
             Err(err) => diagnostics::error(
-                Span::COMMAND_LINE,
+                &Span::COMMAND_LINE,
                 |report| report.with_message(format!("Failed to open preinclude file: {err}")),
                 &sources,
                 &remaining_errors,
@@ -99,7 +99,7 @@ fn run(options: Options, input_path: PathBuf, defines: Vec<String>) -> Result<()
             ), // Try to keep going even after this failure.
             Ok(handle) => {
                 syntax::parser::parse_file(
-                    &mut context_stack,
+                    &context_stack,
                     &sources,
                     handle,
                     &mut symbols,
@@ -119,7 +119,7 @@ fn run(options: Options, input_path: PathBuf, defines: Vec<String>) -> Result<()
         Ok(handle) => handle,
         Err(err) => {
             diagnostics::error(
-                Span::COMMAND_LINE,
+                &Span::COMMAND_LINE,
                 |report| report.with_message(format!("Failed to open input file: {err}")),
                 &sources,
                 &remaining_errors,
@@ -129,7 +129,7 @@ fn run(options: Options, input_path: PathBuf, defines: Vec<String>) -> Result<()
         }
     };
     syntax::parser::parse_file(
-        &mut context_stack,
+        &context_stack,
         &sources,
         handle,
         &mut symbols,

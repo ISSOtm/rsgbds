@@ -15,6 +15,7 @@ TODO: describe the "char stream" / remainder split more
 
 use std::{cell::Cell, num::NonZeroUsize, ops::Range};
 
+use chrono::format::format;
 use compact_str::CompactString;
 use uncased::UncasedStr;
 
@@ -119,8 +120,34 @@ struct LexParams<'ctx_stack, 'src_store, 'syms, 'sym_ctx_stack, 'errs_rem, 'opti
     options: &'options Options,
 }
 
+pub fn is_next_char_a_colon(
+    ctx_stack: &ContextStack,
+    source_store: &SourceStore,
+    symbols: &mut Symbols, // We need to be able to intern names, and to resolve them for expansion.
+    nb_errors_remaining: &Cell<usize>,
+    options: &Options,
+) -> bool {
+    let mut sources = ctx_stack.sources_mut();
+    let Some((src_ctx, nodes)) = sources.active_context_mut() else {
+        // If there are no more contexts, no more tokens can be produced.
+        return false;
+    };
+    let node = src_ctx.node(nodes);
+    let mut parameters = LexParams {
+        ctx_stack,
+        src_ctx,
+        source_store,
+        node,
+        source: node.source(source_store),
+        symbols,
+        nb_errors_remaining,
+        options,
+    };
+    peek(&mut parameters, true, true) == Some(':')
+}
+
 pub fn next_token<'ctx_stack>(
-    ctx_stack: &'ctx_stack mut ContextStack,
+    ctx_stack: &'ctx_stack ContextStack,
     source_store: &SourceStore,
     symbols: &mut Symbols, // We need to be able to intern names, and to resolve them for expansion.
     nb_errors_remaining: &Cell<usize>,
@@ -243,7 +270,10 @@ pub fn next_token<'ctx_stack>(
                 if peek(params, true, true) == Some('.') {
                     todo!();
                 }
-                break make!(tok!("number")(number));
+                break Token {
+                    payload: tok!("number")(number),
+                    span: span(start, loc(params.src_ctx), ctx_stack, &mut sources),
+                };
             }
 
             '&' => {
@@ -435,7 +465,8 @@ fn read_number(
     while let Some(mut ch) = peek(params, true, true) {
         if ch == '_' {
             let underscore_start = loc(params.src_ctx);
-            consume_char(params.src_ctx, ch);
+            consume_char(params.src_ctx, '_');
+
             match peek(params, true, true) {
                 Some(next) if next.is_digit(radix) => ch = next,
                 _ => {
@@ -611,11 +642,11 @@ fn read_ident(
 ) -> TokenPayload {
     let mut name = CompactString::default();
     while let Some(ch) = peek(params, with_expansions, with_expansions) {
-        consume_char(params.src_ctx, ch);
-
         let chars!(ident) = ch else {
             break;
         };
+
+        consume_char(params.src_ctx, ch);
         name.push(ch);
     }
 
@@ -625,6 +656,235 @@ fn read_ident(
         }
     }
     tok!("identifier")(params.symbols.intern_name(name))
+}
+
+pub fn next_raw(
+    ctx_stack: &ContextStack,
+    source_store: &SourceStore,
+    symbols: &mut Symbols,
+    nb_errors_remaining: &Cell<usize>,
+    options: &Options,
+) -> Option<CompactString> {
+    let mut sources = ctx_stack.sources_mut();
+    let (src_ctx, nodes) = sources.active_context_mut()?; // If there are no more contexts, no more tokens can be produced.
+    let node = src_ctx.node(nodes);
+    let mut params = LexParams {
+        ctx_stack,
+        src_ctx,
+        source_store,
+        node,
+        source: node.source(source_store),
+        symbols,
+        nb_errors_remaining,
+        options,
+    };
+
+    // Trim left whitespace (but not block comments!).
+    while let Some(ch) = peek(&mut params, true, true) {
+        match ch {
+            chars!(whitespace) => consume_char(params.src_ctx, ch), // Just discard whitespace.
+            '\\' => {
+                consume_char(params.src_ctx, '\\');
+                let ch = peek(&mut params, true, true);
+                if !matches!(ch, None | Some(chars!(whitespace) | chars!(newline))) {
+                    todo!(); // Process as a normal character...
+                }
+                todo!(); // Line continuation
+            }
+            _ => break,
+        }
+    }
+
+    let mut raw_elem = CompactString::default();
+
+    let mut parens_depth = 0usize;
+    let ended_on_comma = loop {
+        macro_rules! consume {
+            ($ch:expr) => {{
+                consume_char(params.src_ctx, $ch);
+                raw_elem.push($ch);
+            }};
+        }
+
+        fn consume_string_literal(
+            params: &mut LexParams<'_, '_, '_, '_, '_, '_>,
+            is_raw: bool,
+            raw_elem: &mut CompactString,
+        ) {
+            let start = loc(params.src_ctx);
+
+            // Note that throughout this function, macro args and interpolation are handled manually.
+            // This is required, because quotes inside of them are treated specially:
+            // they cannot end the string.
+
+            // This function is reached after reading only one quote, but multiline strings use three.
+            debug_assert_eq!(peek(params, false, false), Some('"'));
+            consume_char(params.src_ctx, '"');
+            raw_elem.push('"');
+            let multiline = if peek(params, false, false) == Some('"') {
+                consume_char(params.src_ctx, '"');
+                raw_elem.push('"');
+                if peek(params, false, false) == Some('"') {
+                    consume_char(params.src_ctx, '"');
+                    raw_elem.push('"');
+                    true
+                } else {
+                    // `""` is an empty string, so skip the loop.
+                    return;
+                }
+            } else {
+                false
+            };
+
+            loop {
+                let Some(ch) = peek(params, false, false)
+                    .and_then(|ch| (multiline || !matches!(ch, chars!(newline))).then_some(ch))
+                else {
+                    params.error(start, |error, (handle, range)| {
+                        error
+                            .with_message("Unterminated string literal")
+                            .with_label(
+                                diagnostics::error_label((handle, range.start..range.start + 1))
+                                    .with_message("The string begun here"),
+                            )
+                    });
+                    return;
+                };
+
+                // Since we will be staying in the string, we can safely consume that character.
+                let start = loc(&params.src_ctx);
+                consume_char(params.src_ctx, ch);
+
+                match ch {
+                    '"' => {
+                        raw_elem.push('"');
+                        if !multiline {
+                            break;
+                        }
+                        // A multiline string needs *three* double-quotes in a row to be terminated.
+                        if peek(params, false, false) == Some('"') {
+                            consume_char(params.src_ctx, '"');
+                            raw_elem.push('"');
+                            if peek(params, false, false) == Some('"') {
+                                consume_char(params.src_ctx, '"');
+                                raw_elem.push('"');
+                                break;
+                            }
+                        }
+                    }
+
+                    // Character escape, or macro arg.
+                    '\\' if !is_raw => {
+                        match peek(params, false, false) {
+                            // Line continuation.
+                            Some(chars!(whitespace) | chars!(newline)) => todo!(),
+
+                            // Macro arg.
+                            Some(chars!(starts_macro_arg)) => todo!(),
+
+                            None => diagnostics::lex_error(
+                                params.node,
+                                &(start.1..loc(params.src_ctx).1),
+                                |error, span| {
+                                    error
+                                        .with_message("Backslash found at the end of input")
+                                        .with_label(diagnostics::error_label(span).with_message(
+                                            "This backslash is not followed by any characters",
+                                        ))
+                                },
+                                params.source_store,
+                                params.nb_errors_remaining,
+                                params.options,
+                            ),
+                            Some(ch) => diagnostics::lex_error(
+                                params.node,
+                                &(start.1..loc(params.src_ctx).1),
+                                |error, span| {
+                                    error
+                                        .with_message(format!("Invalid character escape '\\{ch}'"))
+                                        .with_label(diagnostics::error_label(span).with_message(
+                                            "This backslash is not followed by any characters",
+                                        ))
+                                },
+                                params.source_store,
+                                params.nb_errors_remaining,
+                                params.options,
+                            ),
+                        }
+                    }
+
+                    '{' if !is_raw => {
+                        if let Some((_name, contents)) = read_interpolation(params) {
+                            todo!();
+                        }
+                    }
+
+                    ch => raw_elem.push(ch),
+                }
+            }
+        }
+
+        match peek(&mut params, true, true) {
+            // String literals inside of a raw element.
+            Some('"') => consume_string_literal(&mut params, false, &mut raw_elem),
+            // (Possibly) raw string literals inside of a raw element.
+            Some('#') => {
+                consume!('#');
+                if peek(&mut params, true, true) == Some('"') {
+                    consume_string_literal(&mut params, true, &mut raw_elem);
+                }
+            }
+
+            Some('(') => {
+                consume!('(');
+                parens_depth += 1;
+            }
+            Some(')') => {
+                consume!(')');
+                if parens_depth != 0 {
+                    parens_depth -= 1;
+                } else {
+                    todo!() // Warn?
+                }
+            }
+
+            // Block comments inside of macro args.
+            Some('/') => todo!(),
+            // Line comments at the end of a raw element.
+            Some(';') => {
+                discard_comment(&mut params);
+                break false; // We know we must be at EOL.
+            }
+            Some(chars!(newline)) | None => break false, // Finished!
+
+            Some(',') if parens_depth == 0 => {
+                consume_char(params.src_ctx, ',');
+                break true;
+            }
+
+            // Character escape.
+            Some('\\') => todo!(),
+
+            Some(ch) => consume!(ch),
+        }
+    };
+
+    if parens_depth != 0 {
+        // TODO: warn?
+    }
+
+    // Trim whitespace at the end of the macro arg.
+    raw_elem.truncate(
+        raw_elem
+            .trim_end_matches(|ch| matches!(ch, chars!(whitespace)))
+            .len(),
+    );
+
+    if ended_on_comma || !raw_elem.is_empty() {
+        Some(raw_elem)
+    } else {
+        None
+    }
 }
 
 /// Assuming that a `\r` has just been consumed, consumes a `\n` if it is the next char.
