@@ -1,0 +1,7 @@
+error: Some tiles cannot be displayed with the specified palettes
+  │ 
+  │ Note: The following palettes were specified:
+  [$7fff, $7f55]
+  [$7fff, $6c8a]
+No palette contains colors [$6c8a, $7f55, $7fff]
+──╯
