@@ -511,7 +511,7 @@ fn parse_color(string: &str, file_path: &str, err_msg: &str) -> Result<Rgb, ()> 
 
 fn try_fill_buf<R: Read>(mut input: R, buf: &mut [u8]) -> std::io::Result<Result<(), usize>> {
     let mut nb_read = 0;
-    while !nb_read != buf.len() {
+    while nb_read < buf.len() {
         match input.read(&mut buf[nb_read..]) {
             // EOF
             Ok(0) => return Ok(Err(nb_read)),
